@@ -52,9 +52,9 @@ void WALBOSS_TurnToPosition(Instance *instance, Position *target)
     WALBOSS_InterpSegmentYaw(instance, angle & 0xFFF);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_ChooseAttack);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_ChooseAttack\n.type WALBOSS_ChooseAttack, @function\nWALBOSS_ChooseAttack:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_ChooseAttack.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_ShouldIAttack);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_ShouldIAttack\n.type WALBOSS_ShouldIAttack, @function\nWALBOSS_ShouldIAttack:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_ShouldIAttack.s\"\n.set reorder\n.set at\n");
 
 void WALBOSS_MessageToLegs(int message)
 {
