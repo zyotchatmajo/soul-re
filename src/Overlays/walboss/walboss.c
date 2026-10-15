@@ -136,11 +136,11 @@ __asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_HitByEgg\n.ty
 
 __asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_HandleThorn\n.type WALBOSS_HandleThorn, @function\nWALBOSS_HandleThorn:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_HandleThorn.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_Collide);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_Collide\n.type WALBOSS_Collide, @function\nWALBOSS_Collide:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_Collide.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_Message);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_Message\n.type WALBOSS_Message, @function\nWALBOSS_Message:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_Message.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_Query);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_Query\n.type WALBOSS_Query, @function\nWALBOSS_Query:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_Query.s\"\n.set reorder\n.set at\n");
 
 INCLUDE_RODATA("asm/nonmatchings/Overlays/walboss/walboss", D_88000000);
 
