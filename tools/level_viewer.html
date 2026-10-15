@@ -325,7 +325,7 @@ function matchingSrmForSra(path) {
   const stem = path.slice(slash + 1, -4);
   const wanted = [`${dir}${stem}_1.SRM`, `${dir}${stem}.SRM`];
   return wanted.find(candidate => objectListCache.some(value => value.toLowerCase() === candidate.toLowerCase())) ||
-    objectListCache.find(value => value.toLowerCase().startsWith(`${dir}${stem.toLowerCase()}_`) && value.toLowerCase().endsWith(".srm"));
+    objectListCache.find(value => value.toLowerCase().startsWith(`${dir.toLowerCase()}${stem.toLowerCase()}_`) && value.toLowerCase().endsWith(".srm"));
 }
 async function loadSraArchive(path) {
   if (!path) {
