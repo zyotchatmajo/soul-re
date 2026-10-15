@@ -39,6 +39,11 @@ python tools/level_viewer.py `
   --open
 ```
 
+The viewer's new Placements panel can add object, spawn, trigger, and light
+sidecar entries by raycasting onto the terrain. Exported
+`soul-re-placement-v1` JSON is an editor artifact for now; it is not yet
+written into the remaster's runtime object tables.
+
 ## What we can mod first
 
 The lowest-risk first target is a loose `.drm` scene asset. The current tools

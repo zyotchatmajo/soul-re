@@ -104,6 +104,12 @@ python tools/level_viewer.py \
   --port 8765
 ```
 
+The Placements panel adds editor-side object/spawn/trigger/light markers. Use
+`Click to place` to raycast onto the terrain, adjust the numeric coordinates,
+and export a `soul-re-placement-v1` JSON sidecar. These placements are
+currently viewer data; they do not overwrite the DRM or claim to be game
+runtime objects until the DRM object-instance tables are decoded.
+
 The same viewer and DRM tools work against the PC remaster's loose `AREA`
 directory. For example, the installed `city9.drm` was parsed successfully
 with the original relocation layout, geometry arrays, and marker structures:

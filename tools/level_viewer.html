@@ -14,7 +14,7 @@
     h2 { margin: 20px 0 8px; font-size: 13px; color: var(--accent); text-transform: uppercase; letter-spacing: .08em; }
     p { color: var(--muted); line-height: 1.45; }
     label { display: block; margin: 10px 0 5px; color: var(--muted); }
-    select, button { width: 100%; border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; color: var(--text); background: var(--panel2); font: inherit; }
+    select, input, button { width: 100%; border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; color: var(--text); background: var(--panel2); font: inherit; }
     button { cursor: pointer; }
     button:hover { border-color: var(--accent); }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -22,10 +22,17 @@
     .stat span:first-child { color: var(--muted); }
     .stat span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
     #markers { max-height: 270px; overflow: auto; border: 1px solid var(--line); border-radius: 5px; }
+    #placements { max-height: 190px; overflow: auto; border: 1px solid var(--line); border-radius: 5px; }
     .marker { padding: 5px 7px; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 12px; }
     .marker:last-child { border-bottom: 0; }
     .marker-kind { display: inline-block; width: 45px; color: var(--accent); text-transform: uppercase; font-size: 10px; }
     .marker-pos { color: var(--muted); margin-left: 45px; }
+    .placement { padding: 6px 7px; border-bottom: 1px solid rgba(255,255,255,.06); cursor: pointer; font-size: 12px; }
+    .placement:last-child { border-bottom: 0; }
+    .placement.selected { background: #21405b; }
+    .placement-pos { color: var(--muted); margin-top: 2px; }
+    .coord-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .coord-grid label { margin: 0; font-size: 11px; }
     #viewport { position: relative; min-width: 0; }
     canvas { display: block; width: 100%; height: 100%; cursor: grab; }
     canvas.dragging { cursor: grabbing; }
@@ -40,7 +47,7 @@
 <div id="app">
   <aside>
     <h1>Soul Reaver 3D Viewer</h1>
-    <p>Inspect extracted DRM terrain and its gameplay markers. The viewer is read-only; edits remain in the scene-patch workflow.</p>
+    <p>Inspect extracted DRM terrain and gameplay markers. Custom placements are saved as sidecar JSON until runtime object tables are decoded.</p>
     <h2>Level</h2>
     <label for="asset">DRM asset</label>
     <select id="asset"></select>
@@ -51,11 +58,32 @@
     <h2>Display</h2>
     <label class="check"><input id="wire" type="checkbox"> wireframe overlay</label>
     <label class="check"><input id="markersToggle" type="checkbox" checked> scene markers</label>
+    <h2>Placements</h2>
+    <label for="objectType">object type</label>
+    <select id="objectType"><option value="object">object</option><option value="spawn">spawn point</option><option value="trigger">trigger</option><option value="light">light</option></select>
+    <label for="objectName">name</label>
+    <input id="objectName" value="custom_object" maxlength="48">
+    <div class="coord-grid" style="margin-top:8px">
+      <label>X<input id="objectX" type="number" step="1"></label>
+      <label>Y<input id="objectY" type="number" step="1"></label>
+      <label>Z<input id="objectZ" type="number" step="1"></label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="placeCenter">Place at center</button>
+      <button id="placeMode">Click to place</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="exportPlacements">Export JSON</button>
+      <button id="importPlacements">Import JSON</button>
+    </div>
+    <input id="placementFile" type="file" accept="application/json" hidden>
+    <button id="deletePlacement" style="margin-top:8px">Delete selected</button>
+    <div id="placements" style="margin-top:8px"><div class="placement">No custom placements.</div></div>
     <h2>Geometry</h2>
     <div id="stats"><div class="stat"><span>Status</span><span id="status">Loading…</span></div></div>
     <h2>Markers</h2>
     <div id="markers"><div class="marker">No markers loaded.</div></div>
-    <p class="help">Drag to orbit. Shift-drag to pan. Mouse wheel zooms. X/Y are the level plane; Z is height.</p>
+    <p class="help">Drag to orbit. Shift-drag to pan. Mouse wheel zooms. Click-to-place raycasts the terrain. X/Y are the level plane; Z is height.</p>
   </aside>
   <main id="viewport">
     <canvas id="canvas"></canvas>
@@ -72,6 +100,14 @@ const assetSelect = document.getElementById("asset");
 const markersEl = document.getElementById("markers");
 const wireToggle = document.getElementById("wire");
 const markersToggle = document.getElementById("markersToggle");
+const placementsEl = document.getElementById("placements");
+const objectTypeEl = document.getElementById("objectType");
+const objectNameEl = document.getElementById("objectName");
+const objectXEl = document.getElementById("objectX");
+const objectYEl = document.getElementById("objectY");
+const objectZEl = document.getElementById("objectZ");
+const placeModeEl = document.getElementById("placeMode");
+const placementFileEl = document.getElementById("placementFile");
 if (!gl) { statusEl.textContent = "WebGL unavailable"; throw new Error("WebGL unavailable"); }
 
 const vertexSource = `
@@ -105,8 +141,16 @@ let markerBuffer = null;
 let markerColorBuffer = null;
 let markerCount = 0;
 let indexCount = 0;
+let objectBuffer = null;
+let objectColorBuffer = null;
+let objectLineCount = 0;
+let objectPointCount = 0;
+let placements = [];
+let selectedPlacement = -1;
+let placementMode = false;
 let view = { yaw: 0.75, pitch: 0.7, distance: 2.7, panX: 0, panY: 0, target: [0, 0, 0], scale: 1 };
 let drag = null;
+let dragMoved = false;
 
 function mat4Multiply(a, b) {
   const o = new Float32Array(16);
@@ -134,15 +178,37 @@ function resize() { const dpr = Math.min(window.devicePixelRatio || 1, 2); const
 function putAttribute(buffer, location, size) { gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.enableVertexAttribArray(location); gl.vertexAttribPointer(location, size, gl.FLOAT, false, 0, 0); }
 function colorForHeight(height, min, max) { const t = Math.max(0, Math.min(1, (height-min)/Math.max(max-min,1))); return [0.13+0.25*t, 0.34+0.45*t, 0.32+0.45*t]; }
 function markerColor(kind) { return kind === "intro" ? [0.95,0.32,0.34] : kind === "plan" ? [0.35,0.65,0.95] : [0.98,0.78,0.25]; }
-function clearBuffers() { for (const b of [geometryBuffer,colorBuffer,indexBuffer,markerBuffer,markerColorBuffer]) if (b) gl.deleteBuffer(b); geometryBuffer=colorBuffer=indexBuffer=markerBuffer=markerColorBuffer=null; markerCount=0; indexCount=0; }
+function objectColor(kind) { return kind === "spawn" ? [0.35,0.95,0.65] : kind === "trigger" ? [0.95,0.45,0.8] : kind === "light" ? [1.0,0.78,0.25] : [0.45,0.85,1.0]; }
+function clearBuffers() { for (const b of [geometryBuffer,colorBuffer,indexBuffer,markerBuffer,markerColorBuffer,objectBuffer,objectColorBuffer]) if (b) gl.deleteBuffer(b); geometryBuffer=colorBuffer=indexBuffer=markerBuffer=markerColorBuffer=objectBuffer=objectColorBuffer=null; markerCount=0; indexCount=0; objectLineCount=0; objectPointCount=0; }
+function localPosition(x, y, z) { return [(x-model.center[0])/model.scale, (z-model.center[2])/model.scale, (y-model.center[1])/model.scale]; }
+function rawPosition(local) { return [local[0]*model.scale+model.center[0], local[2]*model.scale+model.center[1], local[1]*model.scale+model.center[2]]; }
+function rebuildPlacementBuffers() {
+  if (objectBuffer) gl.deleteBuffer(objectBuffer); if (objectColorBuffer) gl.deleteBuffer(objectColorBuffer);
+  const positions=[], colors=[]; const size=.035;
+  for (const p of placements) { const q=localPosition(p.x,p.y,p.z), c=objectColor(p.kind); positions.push(q[0]-size,q[1],q[2], q[0]+size,q[1],q[2], q[0],q[1]-size,q[2], q[0],q[1]+size,q[2], q[0],q[1],q[2]-size, q[0],q[1],q[2]+size); for(let i=0;i<6;i++) colors.push(c[0],c[1],c[2]); }
+  for (const p of placements) { const q=localPosition(p.x,p.y,p.z), c=objectColor(p.kind); positions.push(q[0],q[1],q[2]); colors.push(c[0],c[1],c[2]); }
+  objectLineCount=placements.length*6; objectPointCount=placements.length;
+  objectBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,objectBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(positions),gl.DYNAMIC_DRAW);
+  objectColorBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,objectColorBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(colors),gl.DYNAMIC_DRAW);
+}
+function renderPlacementList() {
+  placementsEl.innerHTML=placements.length ? placements.map((p,i)=>`<div class="placement ${i===selectedPlacement?"selected":""}" data-index="${i}"><b>${escapeHtml(p.name)}</b> <span style="color:var(--accent)">${escapeHtml(p.kind)}</span><div class="placement-pos">(${p.x}, ${p.y}, ${p.z})</div></div>`).join("") : '<div class="placement">No custom placements.</div>';
+  for (const el of placementsEl.querySelectorAll(".placement[data-index]")) el.addEventListener("click",()=>selectPlacement(Number(el.dataset.index)));
+}
+function selectPlacement(index) { selectedPlacement=index; const p=placements[index]; if(p){objectTypeEl.value=p.kind;objectNameEl.value=p.name;objectXEl.value=p.x;objectYEl.value=p.y;objectZEl.value=p.z;} renderPlacementList(); }
+function readPlacementForm() { return {kind:objectTypeEl.value,name:objectNameEl.value.trim()||`custom_object_${placements.length}`,x:Number(objectXEl.value),y:Number(objectYEl.value),z:Number(objectZEl.value),rotation:0,scale:1}; }
+function writePlacementFromForm() { if(selectedPlacement<0||!placements[selectedPlacement]) return; const p=readPlacementForm(); if(![p.x,p.y,p.z].every(Number.isFinite)) return; placements[selectedPlacement]=p; rebuildPlacementBuffers(); renderPlacementList(); }
+function addPlacement(position) { const p=readPlacementForm(); p.x=Math.round(position[0]); p.y=Math.round(position[1]); p.z=Math.round(position[2]); if(!objectNameEl.value.trim()) p.name=`custom_object_${placements.length}`; placements.push(p); selectedPlacement=placements.length-1; objectXEl.value=p.x;objectYEl.value=p.y;objectZEl.value=p.z; rebuildPlacementBuffers(); renderPlacementList(); }
 function loadModel(data) {
   clearBuffers(); model=data;
   const s=data.summary, min=s.bounds_min, max=s.bounds_max;
   const cx=(min[0]+max[0])/2, cy=(min[1]+max[1])/2, cz=(min[2]+max[2])/2;
   const scale=Math.max(max[0]-min[0],max[1]-min[1],max[2]-min[2],1)/2;
+  model.center=[cx,cy,cz]; model.scale=scale; model.localVertices=[];
+  placements=[]; selectedPlacement=-1; placementMode=false; placeModeEl.textContent="Click to place"; renderPlacementList();
   view.scale=scale; view.target=[0,0,0]; view.panX=0; view.panY=0; view.distance=2.7; view.yaw=.75; view.pitch=.7;
   const positions=[], colors=[];
-  for (const v of data.vertices) { positions.push((v[0]-cx)/scale, (v[2]-cz)/scale, (v[1]-cy)/scale); const c=colorForHeight(v[2],min[2],max[2]); colors.push(c[0],c[1],c[2]); }
+  for (const v of data.vertices) { const q=[(v[0]-cx)/scale, (v[2]-cz)/scale, (v[1]-cy)/scale]; model.localVertices.push(q); positions.push(q[0],q[1],q[2]); const c=colorForHeight(v[2],min[2],max[2]); colors.push(c[0],c[1],c[2]); }
   const indices=[];
   for (const f of data.faces) if (f[0]<data.vertices.length && f[1]<data.vertices.length && f[2]<data.vertices.length) indices.push(f[0],f[1],f[2]);
   indexCount=indices.length;
@@ -168,17 +234,40 @@ function render() {
   gl.useProgram(program); gl.uniformMatrix4fv(matrixLoc,false,matrix()); putAttribute(geometryBuffer,positionLoc,3); putAttribute(colorBuffer,colorLoc,3); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.drawElements(gl.TRIANGLES,indexCount,gl.UNSIGNED_SHORT,0);
   if (wireToggle.checked) { gl.disable(gl.DEPTH_TEST); gl.lineWidth(1); gl.drawElements(gl.LINE_STRIP,indexCount,gl.UNSIGNED_SHORT,0); gl.enable(gl.DEPTH_TEST); }
   if (markersToggle.checked && markerCount) { gl.disable(gl.DEPTH_TEST); putAttribute(markerBuffer,positionLoc,3); putAttribute(markerColorBuffer,colorLoc,3); gl.drawArrays(gl.POINTS,0,markerCount); gl.enable(gl.DEPTH_TEST); }
+  if (objectLineCount) { gl.disable(gl.DEPTH_TEST); putAttribute(objectBuffer,positionLoc,3); putAttribute(objectColorBuffer,colorLoc,3); gl.drawArrays(gl.LINES,0,objectLineCount); gl.drawArrays(gl.POINTS,objectLineCount,objectPointCount); gl.enable(gl.DEPTH_TEST); }
   requestAnimationFrame(render);
 }
 async function fetchJson(url) { const r=await fetch(url); if (!r.ok) throw new Error(await r.text()); return await r.json(); }
 async function loadPath(path) { statusEl.textContent="Loading…"; try { loadModel(await fetchJson(`/api/drm?path=${encodeURIComponent(path)}`)); history.replaceState(null,"",`?drm=${encodeURIComponent(path)}`); } catch(e) { statusEl.textContent="Error"; markersEl.innerHTML=`<div class="marker">${escapeHtml(e.message)}</div>`; } }
 async function init() { try { const list=await fetchJson("/api/list"); assetSelect.innerHTML=list.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); const wanted=new URLSearchParams(location.search).get("drm"); const initial=wanted && list.includes(wanted) ? wanted : (list.includes("city/bin/city2.drm") ? "city/bin/city2.drm" : list[0]); if(initial){ assetSelect.value=initial; await loadPath(initial); } } catch(e) { statusEl.textContent="Error"; markersEl.innerHTML=`<div class="marker">${escapeHtml(e.message)}</div>`; } }
+function normalize(v) { const l=Math.hypot(v[0],v[1],v[2])||1; return [v[0]/l,v[1]/l,v[2]/l]; }
+function cross(a,b) { return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]; }
+function dot(a,b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+function terrainHit(clientX, clientY) {
+  if(!model || !model.localVertices.length) return null;
+  const rect=canvas.getBoundingClientRect(), nx=((clientX-rect.left)/rect.width)*2-1, ny=1-((clientY-rect.top)/rect.height)*2;
+  const aspect=rect.width/Math.max(rect.height,1), cp=Math.cos(view.pitch), sp=Math.sin(view.pitch), sy=Math.sin(view.yaw), cy=Math.cos(view.yaw);
+  const target=[view.panX,view.panY,0], eye=[target[0]+view.distance*cp*sy,target[1]+view.distance*sp,target[2]+view.distance*cp*cy];
+  const forward=normalize([target[0]-eye[0],target[1]-eye[1],target[2]-eye[2]]), right=normalize(cross(forward,[0,1,0])), up=cross(right,forward), f=Math.tan(Math.PI/8);
+  const direction=normalize([forward[0]+right[0]*nx*aspect*f+up[0]*ny*f,forward[1]+right[1]*nx*aspect*f+up[1]*ny*f,forward[2]+right[2]*nx*aspect*f+up[2]*ny*f]);
+  let best=Infinity, hit=null;
+  for(const face of model.faces){if(face[0]>=model.localVertices.length||face[1]>=model.localVertices.length||face[2]>=model.localVertices.length)continue;const a=model.localVertices[face[0]],b=model.localVertices[face[1]],c=model.localVertices[face[2]],e1=[b[0]-a[0],b[1]-a[1],b[2]-a[2]],e2=[c[0]-a[0],c[1]-a[1],c[2]-a[2]],h=cross(direction,e2),det=dot(e1,h);if(Math.abs(det)<1e-7)continue;const inv=1/det,s=[eye[0]-a[0],eye[1]-a[1],eye[2]-a[2]],u=inv*dot(s,h);if(u<0||u>1)continue;const q=cross(s,e1),v=inv*dot(direction,q);if(v<0||u+v>1)continue;const t=inv*dot(e2,q);if(t>0&&t<best){best=t;hit=[eye[0]+direction[0]*t,eye[1]+direction[1]*t,eye[2]+direction[2]*t];}}
+  return hit ? rawPosition(hit) : null;
+}
 assetSelect.addEventListener("change",()=>loadPath(assetSelect.value));
 document.getElementById("reload").addEventListener("click",()=>loadPath(assetSelect.value));
 document.getElementById("reset").addEventListener("click",()=>{ if(model){view.panX=0;view.panY=0;view.distance=2.7;view.yaw=.75;view.pitch=.7;} });
-canvas.addEventListener("pointerdown",e=>{drag={x:e.clientX,y:e.clientY,pan:e.shiftKey||e.button===1};canvas.classList.add("dragging");canvas.setPointerCapture(e.pointerId);});
+document.getElementById("placeCenter").addEventListener("click",()=>{if(!model)return;const s=model.summary,min=s.bounds_min,max=s.bounds_max;addPlacement([(min[0]+max[0])/2,(min[1]+max[1])/2,(min[2]+max[2])/2]);});
+placeModeEl.addEventListener("click",()=>{placementMode=!placementMode;placeModeEl.textContent=placementMode?"Cancel placement":"Click to place";canvas.style.cursor=placementMode?"crosshair":"grab";});
+document.getElementById("deletePlacement").addEventListener("click",()=>{if(selectedPlacement<0)return;placements.splice(selectedPlacement,1);selectedPlacement=Math.min(selectedPlacement,placements.length-1);if(selectedPlacement>=0)selectPlacement(selectedPlacement);else{rebuildPlacementBuffers();renderPlacementList();}});
+[objectTypeEl,objectNameEl,objectXEl,objectYEl,objectZEl].forEach(el=>el.addEventListener("input",writePlacementFromForm));
+document.getElementById("exportPlacements").addEventListener("click",()=>{if(!model)return;const blob=new Blob([JSON.stringify({format:"soul-re-placement-v1",source:model.path,placements},null,2)+"\n"],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${(model.summary.world_name||"level")}-placements.json`;a.click();URL.revokeObjectURL(a.href);});
+document.getElementById("importPlacements").addEventListener("click",()=>placementFileEl.click());
+placementFileEl.addEventListener("change",async()=>{const file=placementFileEl.files[0];if(!file)return;try{const data=JSON.parse(await file.text());if(data.format!=="soul-re-placement-v1"||!Array.isArray(data.placements))throw new Error("Not a soul-re-placement-v1 file");placements=data.placements.filter(p=>p&&[p.x,p.y,p.z].every(Number.isFinite)).map((p,i)=>({kind:["object","spawn","trigger","light"].includes(p.kind)?p.kind:"object",name:String(p.name||`custom_object_${i}`),x:Number(p.x),y:Number(p.y),z:Number(p.z),rotation:Number(p.rotation||0),scale:Number(p.scale||1)}));selectedPlacement=placements.length-1;if(selectedPlacement>=0)selectPlacement(selectedPlacement);else{rebuildPlacementBuffers();renderPlacementList();}}catch(e){statusEl.textContent="Placement import error";}});
+canvas.addEventListener("click",e=>{if(!placementMode||dragMoved)return;const hit=terrainHit(e.clientX,e.clientY);if(hit){addPlacement(hit);placementMode=false;placeModeEl.textContent="Click to place";canvas.style.cursor="grab";}});
+canvas.addEventListener("pointerdown",e=>{dragMoved=false;drag={x:e.clientX,y:e.clientY,pan:e.shiftKey||e.button===1};canvas.classList.add("dragging");canvas.setPointerCapture(e.pointerId);});
 canvas.addEventListener("pointerup",e=>{drag=null;canvas.classList.remove("dragging");canvas.releasePointerCapture(e.pointerId);});
-canvas.addEventListener("pointermove",e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.x=e.clientX;drag.y=e.clientY;if(drag.pan){view.panX-=dx*.004*view.distance;view.panY+=dy*.004*view.distance;}else{view.yaw-=dx*.008;view.pitch=Math.max(-1.45,Math.min(1.45,view.pitch-dy*.008));}});
+canvas.addEventListener("pointermove",e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>3)dragMoved=true;drag.x=e.clientX;drag.y=e.clientY;if(drag.pan){view.panX-=dx*.004*view.distance;view.panY+=dy*.004*view.distance;}else{view.yaw-=dx*.008;view.pitch=Math.max(-1.45,Math.min(1.45,view.pitch-dy*.008));}});
 canvas.addEventListener("wheel",e=>{e.preventDefault();view.distance=Math.max(.2,Math.min(30,view.distance*Math.exp(e.deltaY*.001)));},{passive:false});
 window.addEventListener("resize",resize); init(); requestAnimationFrame(render);
 </script>
