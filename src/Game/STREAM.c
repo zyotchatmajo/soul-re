@@ -3650,7 +3650,7 @@ void CalcVert(VECTOR *v, VECTOR *v1, VECTOR *v2, int dist1, int dist2, int k, in
     v->vz = (((v2->vz - v1->vz) >> 12) * (dist2 / diff)) + v2->vz;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/STREAM", AddClippedTri);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl AddClippedTri\nAddClippedTri:\n.include \"asm/nonmatchings/Game/STREAM/AddClippedTri.s\"\n.set reorder\n.set at\n");
 
 int STREAM_GetClipRect(StreamUnitPortal *portal, RECT *rect)
 {

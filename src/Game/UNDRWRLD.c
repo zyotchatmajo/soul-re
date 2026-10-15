@@ -125,7 +125,7 @@ void UNDERWORLD_DoUV(unsigned char *uv, UW_ScreenXY *p0, int tx)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/UNDRWRLD", UNDERWORLD_Poly);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl UNDERWORLD_Poly\nUNDERWORLD_Poly:\n.include \"asm/nonmatchings/Game/UNDRWRLD/UNDERWORLD_Poly.s\"\n.set reorder\n.set at\n");
 
 void UNDERWORLD_DisplayFrame(long *primStart, long drawY)
 {

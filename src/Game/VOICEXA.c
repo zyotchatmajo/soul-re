@@ -385,7 +385,7 @@ void VOICEXA_Resume()
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/VOICEXA", VOICEXA_Tick);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl VOICEXA_Tick\nVOICEXA_Tick:\n.include \"asm/nonmatchings/Game/VOICEXA/VOICEXA_Tick.s\"\n.set reorder\n.set at\n");
 
 int VOICEXA_IsPlaying()
 {

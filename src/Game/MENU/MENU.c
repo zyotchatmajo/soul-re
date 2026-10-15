@@ -191,7 +191,7 @@ void DisplayMenuBox(int x0, int x1, int y0, int y1)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/MENU/MENU", menu_draw_item);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl menu_draw_item\nmenu_draw_item:\n.include \"asm/nonmatchings/Game/MENU/MENU/menu_draw_item.s\"\n.set reorder\n.set at\n");
 
 void menu_draw(menu_t *menu)
 {

@@ -613,7 +613,7 @@ void PIPE3D_CalcWorldToSplitPlaneTransform(MATRIX *wpTransform, SVector *normal,
     wpTransform->t[2] = vector.z;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/PIPE3D", PIPE3D_TransformAnimatedSplitInstanceVertices);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl PIPE3D_TransformAnimatedSplitInstanceVertices\nPIPE3D_TransformAnimatedSplitInstanceVertices:\n.include \"asm/nonmatchings/Game/PIPE3D/PIPE3D_TransformAnimatedSplitInstanceVertices.s\"\n.set reorder\n.set at\n");
 
 void PIPE3D_TransformSplitInstanceVertices(MVertex *vertexList, PVertex *pvertex, Model *model, MATRIX *wpTransform, MATRIX *matrixPool, Mirror *mirror)
 {

@@ -331,7 +331,7 @@ void LIGHT_GetAmbient(struct _ColorType *color, struct _Instance *instance)
     color->r = lightval;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/LIGHT3D", LIGHT_CalcLightValue);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl LIGHT_CalcLightValue\nLIGHT_CalcLightValue:\n.include \"asm/nonmatchings/Game/LIGHT3D/LIGHT_CalcLightValue.s\"\n.set reorder\n.set at\n");
 
 void LIGHT_SetAmbientInstance(Instance *instance, Level *level)
 {

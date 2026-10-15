@@ -362,4 +362,4 @@ void StateHandlerWallIdle(CharacterState *In, int CurrentSection, intptr_t Data)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/RAZIEL/RAZIEL", StateHandlerWallDismount);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl StateHandlerWallDismount\nStateHandlerWallDismount:\n.include \"asm/nonmatchings/Game/RAZIEL/RAZIEL/StateHandlerWallDismount.s\"\n.set reorder\n.set at\n");

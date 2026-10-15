@@ -268,7 +268,7 @@ void StateHandlerSwimCoil(CharacterState *In, int CurrentSection, intptr_t Data)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/RAZIEL/RAZIEL", StateHandlerSwimTread);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl StateHandlerSwimTread\nStateHandlerSwimTread:\n.include \"asm/nonmatchings/Game/RAZIEL/RAZIEL/StateHandlerSwimTread.s\"\n.set reorder\n.set at\n");
 
 void StateHandlerSwimDiveIn(CharacterState *In, int CurrentSection, intptr_t Data)
 {

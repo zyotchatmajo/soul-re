@@ -44,7 +44,7 @@ STATIC long dualshock0_time;
 
 STATIC long dualshock1_time;
 
-INCLUDE_ASM("asm/nonmatchings/Game/GAMEPAD", GAMEPAD_Commands);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl GAMEPAD_Commands\nGAMEPAD_Commands:\n.include \"asm/nonmatchings/Game/GAMEPAD/GAMEPAD_Commands.s\"\n.set reorder\n.set at\n");
 
 int GAMEPAD_ControllerIsDualShock()
 {

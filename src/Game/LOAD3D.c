@@ -103,7 +103,7 @@ static char D_800D0924[] = "something %x\n";
 
 // Matches 100% on decomp.me but differs on this project
 #ifndef NON_MATCHING
-INCLUDE_ASM("asm/nonmatchings/Game/LOAD3D", LOAD_CdReadReady);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl LOAD_CdReadReady\nLOAD_CdReadReady:\n.include \"asm/nonmatchings/Game/LOAD3D/LOAD_CdReadReady.s\"\n.set reorder\n.set at\n");
 #else
 void LOAD_CdReadReady(unsigned char intr, unsigned char *result)
 {

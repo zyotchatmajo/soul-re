@@ -28,7 +28,7 @@ int sprintf(char *str, const char *format, ...)
     return vsprintf(str, format, ap);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/PSX/SUPPORT", vsprintf);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl vsprintf\nvsprintf:\n.include \"asm/nonmatchings/Game/PSX/SUPPORT/vsprintf.s\"\n.set reorder\n.set at\n");
 
 //char *my_itoa(unsigned long value, char *str, int radix)
 char *my_itoa(int value, char *str, int base)

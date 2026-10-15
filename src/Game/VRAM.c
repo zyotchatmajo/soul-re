@@ -561,7 +561,7 @@ void VRAM_ClearVramBlock(BlockVramEntry *block)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/VRAM", AdjustVramCoordsObject);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl AdjustVramCoordsObject\nAdjustVramCoordsObject:\n.include \"asm/nonmatchings/Game/VRAM/AdjustVramCoordsObject.s\"\n.set reorder\n.set at\n");
 
 BlockVramEntry *VRAM_InsertionSort(BlockVramEntry *rootNode, BlockVramEntry *newBlock)
 {

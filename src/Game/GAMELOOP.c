@@ -1554,7 +1554,7 @@ void GAMELOOP_Set_Pause_Redraw()
     pause_redraw_flag = 1;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/GAMELOOP", SaveOT);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl SaveOT\nSaveOT:\n.include \"asm/nonmatchings/Game/GAMELOOP/SaveOT.s\"\n.set reorder\n.set at\n");
 
 void ResetDrawPage()
 {
