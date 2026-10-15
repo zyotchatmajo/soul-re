@@ -114,9 +114,15 @@ __asm__(
     ".set at\n"
 );
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_BirthEggEntry);
+__asm__(
+    ".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_BirthEggEntry\n.type WALBOSS_BirthEggEntry, @function\nWALBOSS_BirthEggEntry:\n"
+    ".include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_BirthEggEntry.s\"\n.set reorder\n.set at\n"
+);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_BirthEgg);
+__asm__(
+    ".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_BirthEgg\n.type WALBOSS_BirthEgg, @function\nWALBOSS_BirthEgg:\n"
+    ".include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_BirthEgg.s\"\n.set reorder\n.set at\n"
+);
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_CorrectLookAT);
 
