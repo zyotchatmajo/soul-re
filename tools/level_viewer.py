@@ -20,7 +20,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from level_editor import _module_offset, _parse_drm, _parse_scene_markers, _patch_scene
+from level_editor import (
+    _append_scene_placements,
+    _module_offset,
+    _parse_drm,
+    _parse_scene_markers,
+    _patch_scene,
+)
 
 
 def _terrain_geometry(path: Path) -> dict[str, object]:
@@ -463,7 +469,7 @@ class ViewerHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
         parsed = urlparse(self.path)
         try:
-            if parsed.path != "/api/apply-markers":
+            if parsed.path not in {"/api/apply-markers", "/api/apply-placements"}:
                 self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"not found\n")
                 return
             if self.write_root is None:
@@ -474,24 +480,33 @@ class ViewerHandler(BaseHTTPRequestHandler):
             markers = payload.get("markers")
             if not isinstance(requested, str) or not requested:
                 raise ValueError("path must be a non-empty string")
-            if not isinstance(markers, list):
-                raise ValueError("markers must be an array")
             source = _safe_asset(self.root, requested)
             source_geometry = _geometry(source)
             if source_geometry.get("asset_type") not in {"drm", "pcm-level"}:
-                raise ValueError("marker writes are limited to DRM/PCM scene assets")
+                raise ValueError("direct writes are limited to DRM/PCM scene assets")
             target = _safe_target(self.write_root, requested)
             before_sha1 = _sha1(target)
-            scene_payload = {"format": "soul-re-scene-v1", "source": requested, "markers": markers}
             with tempfile.TemporaryDirectory(prefix="soul-re-viewer-") as temp_dir:
                 temp_dir_path = Path(temp_dir)
-                scene_path = temp_dir_path / "scene.json"
                 patched_path = temp_dir_path / target.name
-                scene_path.write_text(json.dumps(scene_payload), encoding="utf-8")
-                changed = _patch_scene(source, scene_path, patched_path)
+                if parsed.path == "/api/apply-markers":
+                    markers = payload.get("markers")
+                    if not isinstance(markers, list):
+                        raise ValueError("markers must be an array")
+                    scene_path = temp_dir_path / "scene.json"
+                    scene_payload = {"format": "soul-re-scene-v1", "source": requested, "markers": markers}
+                    scene_path.write_text(json.dumps(scene_payload), encoding="utf-8")
+                    changed = _patch_scene(source, scene_path, patched_path)
+                    added = []
+                else:
+                    placements = payload.get("placements")
+                    if not isinstance(placements, list):
+                        raise ValueError("placements must be an array")
+                    added = _append_scene_placements(source, placements, patched_path)
+                    changed = len(added)
                 after_sha1 = _sha1(patched_path)
                 if before_sha1 == after_sha1:
-                    self._json(HTTPStatus.OK, {"path": requested, "changed": 0, "written": False, "sha1": before_sha1})
+                    self._json(HTTPStatus.OK, {"path": requested, "changed": 0, "added": added, "written": False, "sha1": before_sha1})
                     return
                 timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
                 backup = target.with_name(f"{target.name}.bak-{timestamp}")
@@ -506,6 +521,7 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 {
                     "path": requested,
                     "changed": changed,
+                    "added": added,
                     "written": True,
                     "target": str(target),
                     "backup": str(backup),

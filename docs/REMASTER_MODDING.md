@@ -55,8 +55,11 @@ python tools/level_viewer.py `
 
 The viewer's new Placements panel can add object, spawn, trigger, and light
 sidecar entries by raycasting onto the terrain. Exported
-`soul-re-placement-v1` JSON is an editor artifact for now; it is not yet
-written into the remaster's runtime object tables.
+`soul-re-placement-v1` JSON is an editor artifact, and the viewer can also
+append its `object` entries to a staged scene's runtime intro table when
+started with `--write-root`. Each apply makes a timestamped backup. The mesh
+stem is written as the runtime's 16-byte object name; non-object placement
+kinds remain sidecar-only until their table formats are decoded.
 
 ## What we can mod first
 
@@ -64,7 +67,8 @@ The lowest-risk first target is a loose `.drm` or area `.pcm` scene asset. The
 current tools can export its geometry and markers, change signed 16-bit marker
 positions, validate the result, and write a new asset without touching the
 Steam installation. Object PCMs and SRMs are currently read-only previews in
-the viewer; placements still export as sidecar JSON. Texture replacements are
+the viewer; their meshes are referenced by newly appended scene intro records
+rather than modified in place. Texture replacements are
 another practical target because the remaster exposes DDS files in `AREA/TEX`
 and `AREA/PIX`.
 

@@ -111,9 +111,11 @@ python tools/level_viewer.py \
 
 The Placements panel adds editor-side object/spawn/trigger/light markers. Use
 `Click to place` to raycast onto the terrain, adjust the numeric coordinates,
-and export a `soul-re-placement-v1` JSON sidecar. These placements are
-currently viewer data; they do not overwrite the DRM or claim to be game
-runtime objects until the DRM object-instance tables are decoded.
+and export a `soul-re-placement-v1` JSON sidecar. With an explicit
+`--write-root`, `Apply objects to AREA` appends `object` entries to the scene's
+runtime intro table. The operation creates a timestamped backup first and
+rejects spawn/trigger/light kinds because those do not have an intro-record
+encoding yet. Applying the same sidecar twice intentionally appends duplicates.
 
 ## Direct loose scene testing
 
@@ -131,8 +133,10 @@ python tools/level_viewer.py `
 ```
 
 Select a marker, edit its X/Y/Z fields, and click `Apply to AREA`. This writes
-only marker coordinates through the existing safe scene patcher. Custom object
-placements still export as JSON and are not written into runtime object tables.
+only marker coordinates through the existing safe scene patcher. For custom
+objects, select `object`, choose an OBJECT PCM/SRM (or type a runtime name),
+place it, and click `Apply objects to AREA`; the selected mesh stem becomes the
+16-byte runtime object name (for example `RAZIEL_1.SRM` becomes `raziel`).
 
 The same viewer and DRM/PCM tools work against the PC remaster's loose `AREA`
 directory. For example, the installed `city9.drm` and `ALUKA/aluka10.pcm`

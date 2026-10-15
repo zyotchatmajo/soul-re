@@ -413,6 +413,137 @@ def _patch_scene(source: Path, scene_path: Path, destination: Path) -> int:
     return changed
 
 
+def _placement_asset_name(placement: dict[str, object], index: int) -> str:
+    """Convert a viewer placement into the 16-byte runtime object name."""
+    raw_asset = placement.get("asset")
+    raw_name = placement.get("name")
+    candidate = str(raw_asset or raw_name or f"custom_object_{index}").replace("\\", "/")
+    stem = Path(candidate).stem.strip().lower()
+    # Object SRMs are commonly named ``RAZIEL_1.SRM`` while the runtime intro
+    # table references the object family (``raziel``), not a numbered mesh.
+    stem = re.sub(r"_\d+$", "", stem)
+    if not stem:
+        raise ValueError(f"placement {index} has an empty runtime object name")
+    try:
+        encoded = stem.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ValueError(f"placement {index} runtime object name must be ASCII") from exc
+    if len(encoded) > 16:
+        raise ValueError(f"placement {index} runtime object name exceeds 16 bytes: {stem!r}")
+    return stem
+
+
+def _append_scene_placements(
+    source: Path, placements: list[dict[str, object]], destination: Path
+) -> list[dict[str, object]]:
+    """Append object intro records and return the assigned runtime identifiers.
+
+    This deliberately appends a new intro array instead of shifting any existing
+    serialized data.  The Terrain intro count/pointer are updated in place, and
+    the new records contain no pointers of their own.  It is therefore safe to
+    produce a new file and atomically replace a writable AREA copy after making a
+    backup.  Only ``kind=object`` placements map to runtime intro records.
+    """
+    if not placements:
+        raise ValueError("placements must contain at least one object")
+
+    data = bytearray(source.read_bytes())
+    module_offset, _ = _module_offset(data)
+    module_size = len(data) - module_offset
+
+    def u32(relative: int) -> int:
+        if relative < 0 or relative + 4 > module_size:
+            raise ValueError("scene field is outside the module")
+        return struct.unpack_from("<I", data, module_offset + relative)[0]
+
+    def i32(relative: int) -> int:
+        if relative < 0 or relative + 4 > module_size:
+            raise ValueError("scene field is outside the module")
+        return struct.unpack_from("<i", data, module_offset + relative)[0]
+
+    terrain_relative = u32(0x00)
+    if terrain_relative >= module_size or terrain_relative + 0x10 > module_size:
+        raise ValueError("terrain pointer is outside the scene module")
+    intro_count = i32(terrain_relative + 0x08)
+    intro_relative = u32(terrain_relative + 0x0C)
+    if intro_count < 0:
+        raise ValueError("scene intro count is negative")
+    if intro_count and (intro_relative == 0 or intro_relative + intro_count * 0x4C > module_size):
+        raise ValueError("scene intro array extends beyond the module")
+
+    existing_ids: list[int] = []
+    template = bytearray(0x4C)
+    for index in range(intro_count):
+        relative = intro_relative + index * 0x4C
+        record = data[module_offset + relative : module_offset + relative + 0x4C]
+        if len(record) != 0x4C:
+            raise ValueError("scene intro record is truncated")
+        existing_ids.append(struct.unpack_from("<i", record, 0x14)[0])
+        # A normal object intro has no camera/path flag.  Reusing its defaults
+        # preserves fields the game may expect beyond the documented transform.
+        if struct.unpack_from("<i", record, 0x2C)[0] == 0 and template == bytearray(0x4C):
+            template = bytearray(record)
+
+    next_identifier = max(existing_ids, default=0) + 1
+    if next_identifier > 0x7FFFFFFF:
+        raise ValueError("no signed 32-bit runtime identifiers remain")
+
+    def coordinate(value: object, label: str) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or not -32768 <= value <= 32767:
+            raise ValueError(f"{label} must be a signed 16-bit integer")
+        return value
+
+    # The pointer is replaced with a new contiguous array, so preserve every
+    # existing intro record before appending the newly authored objects.
+    records = bytearray(
+        data[module_offset + intro_relative : module_offset + intro_relative + intro_count * 0x4C]
+        if intro_count
+        else b""
+    )
+    assigned: list[dict[str, object]] = []
+    for index, placement in enumerate(placements):
+        if not isinstance(placement, dict):
+            raise ValueError("each placement must be an object")
+        if placement.get("kind", "object") != "object":
+            raise ValueError("only kind=object placements can be written to the runtime intro table")
+        name = _placement_asset_name(placement, index)
+        x = coordinate(placement.get("x"), f"placement[{index}].x")
+        y = coordinate(placement.get("y"), f"placement[{index}].y")
+        z = coordinate(placement.get("z"), f"placement[{index}].z")
+        rotation = placement.get("rotation", 0)
+        if isinstance(rotation, bool) or not isinstance(rotation, (int, float)):
+            raise ValueError(f"placement[{index}].rotation must be numeric")
+        rotation_units = int(round(float(rotation) * 4096.0 / 360.0))
+        if not -32768 <= rotation_units <= 32767:
+            raise ValueError(f"placement[{index}].rotation is outside the supported range")
+        record = bytearray(template)
+        record[0:16] = name.encode("ascii").ljust(16, b"\0")
+        struct.pack_into("<i", record, 0x14, next_identifier)
+        struct.pack_into("<hhh", record, 0x18, rotation_units, 0, 0)
+        struct.pack_into("<hhh", record, 0x20, x, y, z)
+        records.extend(record)
+        assigned.append({"index": index, "name": name, "identifier": next_identifier, "x": x, "y": y, "z": z})
+        next_identifier += 1
+        if next_identifier > 0x7FFFFFFF and index + 1 < len(placements):
+            raise ValueError("no signed 32-bit runtime identifiers remain")
+
+    # Keep all existing offsets stable and put the replacement array at EOF.
+    while len(data) % 4:
+        data.append(0)
+    new_intro_relative = len(data) - module_offset
+    data.extend(records)
+    struct.pack_into("<i", data, module_offset + terrain_relative + 0x08, intro_count + len(placements))
+    struct.pack_into("<I", data, module_offset + terrain_relative + 0x0C, new_intro_relative)
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(data)
+    _parse_drm(destination)
+    parsed = _parse_scene_markers(destination)
+    if len([marker for marker in parsed if marker.kind == "intro"]) != intro_count + len(placements):
+        raise ValueError("written scene intro count did not round-trip")
+    return assigned
+
+
 def _export_svg(path: Path, destination: Path) -> DrmSummary:
     """Export a dependency-free top-down terrain and marker preview as SVG."""
     data = path.read_bytes()

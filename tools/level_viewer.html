@@ -49,7 +49,7 @@
 <div id="app">
   <aside>
     <h1>Soul Reaver 3D Viewer</h1>
-    <p>Inspect extracted DRM terrain and PCM object models. Custom placements are saved as sidecar JSON until runtime object tables are decoded.</p>
+    <p>Inspect extracted DRM terrain and PCM/SRM object models. Placements can be exported as JSON or appended to a staged AREA scene with a backup.</p>
     <h2>Asset</h2>
     <label for="asset">DRM / PCM asset</label>
     <select id="asset"></select>
@@ -81,6 +81,7 @@
       <button id="exportPlacements">Export JSON</button>
       <button id="importPlacements">Import JSON</button>
     </div>
+    <button id="applyPlacements" style="margin-top:8px" disabled>Apply objects to AREA</button>
     <input id="placementFile" type="file" accept="application/json" hidden>
     <button id="deletePlacement" style="margin-top:8px">Delete selected</button>
     <div id="placements" style="margin-top:8px"><div class="placement">No custom placements.</div></div>
@@ -128,6 +129,7 @@ const markerXEl = document.getElementById("markerX");
 const markerYEl = document.getElementById("markerY");
 const markerZEl = document.getElementById("markerZ");
 const applyMarkersEl = document.getElementById("applyMarkers");
+const applyPlacementsEl = document.getElementById("applyPlacements");
 const writeStatusEl = document.getElementById("writeStatus");
 const exportSceneEl = document.getElementById("exportScene");
 if (!gl) { statusEl.textContent = "WebGL unavailable"; throw new Error("WebGL unavailable"); }
@@ -252,8 +254,8 @@ function renderPlacementList() {
 }
 function selectPlacement(index) { selectedPlacement=index; const p=placements[index]; if(p){objectTypeEl.value=p.kind;objectAssetEl.value=p.asset||"";objectNameEl.value=p.name;objectXEl.value=p.x;objectYEl.value=p.y;objectZEl.value=p.z;} renderPlacementList(); }
 function readPlacementForm() { return {kind:objectTypeEl.value,asset:objectAssetEl.value,name:objectNameEl.value.trim()||`custom_object_${placements.length}`,x:Number(objectXEl.value),y:Number(objectYEl.value),z:Number(objectZEl.value),rotation:0,scale:1}; }
-function writePlacementFromForm() { if(selectedPlacement<0||!placements[selectedPlacement]) return; const p=readPlacementForm(); if(![p.x,p.y,p.z].every(Number.isFinite)) return; placements[selectedPlacement]=p; rebuildPlacementBuffers(); renderPlacementList(); void ensureObjectAssets(); }
-function addPlacement(position) { const p=readPlacementForm(); p.x=Math.round(position[0]); p.y=Math.round(position[1]); p.z=Math.round(position[2]); if(!objectNameEl.value.trim()) p.name=`custom_object_${placements.length}`; placements.push(p); selectedPlacement=placements.length-1; objectXEl.value=p.x;objectYEl.value=p.y;objectZEl.value=p.z; rebuildPlacementBuffers(); renderPlacementList(); void ensureObjectAssets(); }
+function writePlacementFromForm() { if(selectedPlacement<0||!placements[selectedPlacement]) return; const p=readPlacementForm(); if(![p.x,p.y,p.z].every(Number.isFinite)) return; placements[selectedPlacement]=p; rebuildPlacementBuffers(); renderPlacementList(); updateAssetControls(); void ensureObjectAssets(); }
+function addPlacement(position) { const p=readPlacementForm(); p.x=Math.round(position[0]); p.y=Math.round(position[1]); p.z=Math.round(position[2]); if(!objectNameEl.value.trim()) p.name=`custom_object_${placements.length}`; placements.push(p); selectedPlacement=placements.length-1; objectXEl.value=p.x;objectYEl.value=p.y;objectZEl.value=p.z; rebuildPlacementBuffers(); renderPlacementList(); updateAssetControls(); void ensureObjectAssets(); }
 function rebuildMarkerBuffers() {
   if(markerBuffer) gl.deleteBuffer(markerBuffer); if(markerColorBuffer) gl.deleteBuffer(markerColorBuffer);
   const positions=[], colors=[];
@@ -300,6 +302,7 @@ function updateAssetControls() {
   for (const el of [markerXEl, markerYEl, markerZEl]) el.disabled = !isScene || !model?.markers?.length;
   exportSceneEl.disabled = !model;
   applyMarkersEl.disabled = !directWritesEnabled || !isScene;
+  applyPlacementsEl.disabled = !directWritesEnabled || !isScene || !placements.length || placements.some(p=>p.kind!=="object");
   if (model && !isScene) writeStatusEl.textContent = "PCM object loaded. Direct marker writes apply to scene assets only.";
 }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
@@ -335,15 +338,16 @@ document.getElementById("reload").addEventListener("click",()=>loadPath(assetSel
 document.getElementById("reset").addEventListener("click",()=>{ if(model){view.panX=0;view.panY=0;view.distance=2.7;view.yaw=.75;view.pitch=.7;} });
 document.getElementById("placeCenter").addEventListener("click",()=>{if(!model)return;const s=model.summary,min=s.bounds_min,max=s.bounds_max;addPlacement([(min[0]+max[0])/2,(min[1]+max[1])/2,(min[2]+max[2])/2]);});
 placeModeEl.addEventListener("click",()=>{placementMode=!placementMode;placeModeEl.textContent=placementMode?"Cancel placement":"Click to place";canvas.style.cursor=placementMode?"crosshair":"grab";});
-document.getElementById("deletePlacement").addEventListener("click",()=>{if(selectedPlacement<0)return;placements.splice(selectedPlacement,1);selectedPlacement=Math.min(selectedPlacement,placements.length-1);if(selectedPlacement>=0)selectPlacement(selectedPlacement);else{rebuildPlacementBuffers();renderPlacementList();}});
+document.getElementById("deletePlacement").addEventListener("click",()=>{if(selectedPlacement<0)return;placements.splice(selectedPlacement,1);selectedPlacement=Math.min(selectedPlacement,placements.length-1);if(selectedPlacement>=0)selectPlacement(selectedPlacement);else{rebuildPlacementBuffers();renderPlacementList();}updateAssetControls();});
 [objectTypeEl,objectAssetEl,objectNameEl,objectXEl,objectYEl,objectZEl].forEach(el=>el.addEventListener("input",writePlacementFromForm));
 objectAssetEl.addEventListener("change",writePlacementFromForm);
 [markerXEl,markerYEl,markerZEl].forEach(el=>el.addEventListener("input",writeMarkerFromForm));
 exportSceneEl.addEventListener("click",()=>{if(!model)return;const blob=new Blob([JSON.stringify({format:"soul-re-scene-v1",source:model.path,summary:model.summary,markers:model.markers},null,2)+"\n"],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${(model.summary.world_name||model.asset_type||"asset")}-scene.json`;a.click();URL.revokeObjectURL(a.href);});
 applyMarkersEl.addEventListener("click",async()=>{if(!directWritesEnabled||!model)return;if(!window.confirm(`Write marker changes directly to ${assetSelect.value}? A timestamped backup will be created first.`))return;applyMarkersEl.disabled=true;writeStatusEl.textContent="Writing backup and patched DRM…";try{const response=await fetch("/api/apply-markers",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:assetSelect.value,markers:model.markers})});const result=await response.json();if(!response.ok)throw new Error(result.error||"direct write failed");writeStatusEl.textContent=result.written?`Applied. Backup: ${result.backup}`:"No changes to write.";await loadPath(assetSelect.value);}catch(e){writeStatusEl.textContent=`Write failed: ${e.message}`;}finally{applyMarkersEl.disabled=!directWritesEnabled;}});
+applyPlacementsEl.addEventListener("click",async()=>{if(!directWritesEnabled||!model||!placements.length)return;if(placements.some(p=>p.kind!=="object")){writeStatusEl.textContent="Only object placements can be written to the runtime intro table.";return;}if(!window.confirm(`Append ${placements.length} object${placements.length===1?"":"s"} to ${assetSelect.value}? A timestamped backup will be created first. Applying the same placements again appends duplicates.`))return;applyPlacementsEl.disabled=true;writeStatusEl.textContent="Writing backup and appending runtime objects…";try{const response=await fetch("/api/apply-placements",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:assetSelect.value,placements})});const result=await response.json();if(!response.ok)throw new Error(result.error||"placement write failed");writeStatusEl.textContent=result.written?`Appended ${result.changed} object${result.changed===1?"":"s"}. Backup: ${result.backup}`:"No changes to write.";await loadPath(assetSelect.value);}catch(e){writeStatusEl.textContent=`Write failed: ${e.message}`;}finally{updateAssetControls();}});
 document.getElementById("exportPlacements").addEventListener("click",()=>{if(!model)return;const blob=new Blob([JSON.stringify({format:"soul-re-placement-v1",source:model.path,placements},null,2)+"\n"],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${(model.summary.world_name||"level")}-placements.json`;a.click();URL.revokeObjectURL(a.href);});
 document.getElementById("importPlacements").addEventListener("click",()=>placementFileEl.click());
-placementFileEl.addEventListener("change",async()=>{const file=placementFileEl.files[0];if(!file)return;try{const data=JSON.parse(await file.text());if(data.format!=="soul-re-placement-v1"||!Array.isArray(data.placements))throw new Error("Not a soul-re-placement-v1 file");placements=data.placements.filter(p=>p&&[p.x,p.y,p.z].every(Number.isFinite)).map((p,i)=>({kind:["object","spawn","trigger","light"].includes(p.kind)?p.kind:"object",asset:String(p.asset||""),name:String(p.name||`custom_object_${i}`),x:Number(p.x),y:Number(p.y),z:Number(p.z),rotation:Number(p.rotation||0),scale:Number(p.scale||1)}));selectedPlacement=placements.length-1;if(selectedPlacement>=0)selectPlacement(selectedPlacement);else{rebuildPlacementBuffers();renderPlacementList();}await ensureObjectAssets();}catch(e){statusEl.textContent="Placement import error";}});
+placementFileEl.addEventListener("change",async()=>{const file=placementFileEl.files[0];if(!file)return;try{const data=JSON.parse(await file.text());if(data.format!=="soul-re-placement-v1"||!Array.isArray(data.placements))throw new Error("Not a soul-re-placement-v1 file");placements=data.placements.filter(p=>p&&[p.x,p.y,p.z].every(Number.isFinite)).map((p,i)=>({kind:["object","spawn","trigger","light"].includes(p.kind)?p.kind:"object",asset:String(p.asset||""),name:String(p.name||`custom_object_${i}`),x:Number(p.x),y:Number(p.y),z:Number(p.z),rotation:Number(p.rotation||0),scale:Number(p.scale||1)}));selectedPlacement=placements.length-1;if(selectedPlacement>=0)selectPlacement(selectedPlacement);else{rebuildPlacementBuffers();renderPlacementList();}updateAssetControls();await ensureObjectAssets();}catch(e){statusEl.textContent="Placement import error";}});
 canvas.addEventListener("click",e=>{if(!placementMode||dragMoved)return;const hit=terrainHit(e.clientX,e.clientY);if(hit){addPlacement(hit);placementMode=false;placeModeEl.textContent="Click to place";canvas.style.cursor="grab";}});
 canvas.addEventListener("pointerdown",e=>{dragMoved=false;drag={x:e.clientX,y:e.clientY,pan:e.shiftKey||e.button===1};canvas.classList.add("dragging");canvas.setPointerCapture(e.pointerId);});
 canvas.addEventListener("pointerup",e=>{drag=null;canvas.classList.remove("dragging");canvas.releasePointerCapture(e.pointerId);});
