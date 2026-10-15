@@ -515,7 +515,26 @@ class ViewerHandler(BaseHTTPRequestHandler):
                     backup = target.with_name(f"{target.name}.bak-{timestamp}-{suffix}")
                     suffix += 1
                 shutil.copy2(target, backup)
-                os.replace(patched_path, target)
+                # The build temp directory may be on C: while the writable
+                # AREA is commonly on another drive.  Stage the final copy
+                # beside the target so os.replace remains same-volume and
+                # atomic on Windows.
+                staged_path: Path | None = None
+                try:
+                    descriptor, staged_name = tempfile.mkstemp(
+                        prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
+                    )
+                    os.close(descriptor)
+                    staged_path = Path(staged_name)
+                    shutil.copyfile(patched_path, staged_path)
+                    os.replace(staged_path, target)
+                    staged_path = None
+                finally:
+                    if staged_path is not None:
+                        try:
+                            staged_path.unlink()
+                        except FileNotFoundError:
+                            pass
             self._json(
                 HTTPStatus.OK,
                 {
