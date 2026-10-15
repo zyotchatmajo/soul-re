@@ -57,7 +57,18 @@ The command validates every marker slot and signed 16-bit coordinate, patches
 only marker position fields, re-parses the result, and refuses to overwrite the
 source DRM. Geometry, relocation entries, and all other fields are unchanged.
 The new DRM still needs to be packed into a BIGFILE before an emulator can run
-it; that packing step is intentionally the next validation milestone.
+it. Use the repository helper from the WSL environment after creating an
+edited staging tree:
+
+```bash
+source /home/kevin/.venvs/soul-re/bin/activate
+python3 tools/pack_bigfile.py config/cd-dat-utils/config.yaml \
+  --input build/bigfile-edited \
+  --output build/BIGFILE-edited.DAT
+```
+
+The helper refreshes the 32-bit word-sum checksums used by the game's streamed
+loader and writes a new container; it never overwrites `game/BIGFILE.DAT`.
 
 ## Desktop browser
 
