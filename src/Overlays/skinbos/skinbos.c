@@ -1117,7 +1117,7 @@ void SKINBOS_WanderEntry(Instance *instance)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/skinbos/skinbos", SKINBOS_Wander);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl SKINBOS_Wander\n.type SKINBOS_Wander, @function\nSKINBOS_Wander:\n.include \"asm/nonmatchings/Overlays/skinbos/skinbos/SKINBOS_Wander.s\"\n.set reorder\n.set at\n");
 
 void SKINBOS_PursueEntry(Instance *instance)
 {
