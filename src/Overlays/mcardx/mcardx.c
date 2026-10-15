@@ -194,7 +194,7 @@ int func_88001148(void *opaque, int param, menu_ctrl_t ctrl)
 	return 0;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_880011CC);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_880011CC\nfunc_880011CC:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_880011CC.s\"\n.set reorder\n.set at\n");
 
 int func_8800125C(void *opaque, int param, menu_ctrl_t ctrl)
 {
@@ -224,9 +224,9 @@ int func_8800125C(void *opaque, int param, menu_ctrl_t ctrl)
 	return 0;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_880012E8);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_880012E8\nfunc_880012E8:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_880012E8.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_880013DC);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_880013DC\nfunc_880013DC:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_880013DC.s\"\n.set reorder\n.set at\n");
 
 int func_88001D50(mcmenu_t *mcmenu, int index)
 {
