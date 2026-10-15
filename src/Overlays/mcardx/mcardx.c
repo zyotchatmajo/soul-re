@@ -7,11 +7,11 @@
 // this conditional is for the objdiff report
 #ifndef SKIP_ASM
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_880003B4);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_880003B4\nfunc_880003B4:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_880003B4.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_880003BC);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_880003BC\nfunc_880003BC:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_880003BC.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_88000438);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88000438\nfunc_88000438:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_88000438.s\"\n.set reorder\n.set at\n");
 
 void func_88000464(mcpsx_t *mcpsx)
 {
