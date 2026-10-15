@@ -42,5 +42,6 @@ int WALLCR_AngleFromPosToPos(Position *oldPos, Position *newPos, Rotation *rotat
 int WALLCR_FollowWall(Instance *instance);
 int WALLCR_NearFloor(Instance *instance);
 void *WALLCR_CollideFace(Level *level, Position *start, Position *end, Position *hit, Position *normal);
+void *WALLCR_FindJumpOnPoint(Instance *instance, Position *position, Position *normal);
 
 #endif

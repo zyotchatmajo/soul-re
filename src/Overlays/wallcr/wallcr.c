@@ -121,7 +121,46 @@ int WALLCR_NearFloor(Instance *instance)
     return 0;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_FindJumpOnPoint);
+void *WALLCR_FindJumpOnPoint(Instance *instance, Position *position, Position *normal)
+{
+    Level *level;
+    void *result = NULL;
+    int i = 0;
+    Position start;
+    Position end;
+    Position offset;
+    Position point;
+
+    level = STREAM_GetLevelWithID(instance->currentStreamUnitID);
+    if (level != NULL)
+    {
+        COPY_SVEC(Position, &point, Position, position);
+        offset.x = 320;
+        offset.y = 0;
+        start.z = point.z;
+        end.z = point.z;
+
+        for (i = 0; i < 4; i++)
+        {
+            start.x = point.x - offset.x;
+            start.y = point.y - offset.y;
+            end.x = point.x + offset.x;
+            end.y = point.y + offset.y;
+            result = WALLCR_CollideFace(level, &start, &end, position, normal);
+            if (result != NULL)
+            {
+                break;
+            }
+
+            offset.y ^= offset.x;
+            offset.x ^= offset.y;
+            offset.y ^= offset.x;
+            offset.x = -offset.x;
+        }
+    }
+
+    return result;
+}
 
 int WALLCR_AngleFromPosToPos(Position *oldPos, Position *newPos, Rotation *rotation)
 {
