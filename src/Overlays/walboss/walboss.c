@@ -66,7 +66,17 @@ void WALBOSS_MessageToLegs(int message)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_LivingLegs);
+__asm__(
+    ".section .text\n"
+    ".set noat\n"
+    ".set noreorder\n"
+    ".globl WALBOSS_LivingLegs\n"
+    ".type WALBOSS_LivingLegs, @function\n"
+    "WALBOSS_LivingLegs:\n"
+    ".include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_LivingLegs.s\"\n"
+    ".set reorder\n"
+    ".set at\n"
+);
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_FindEgg);
 
