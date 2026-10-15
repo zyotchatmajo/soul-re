@@ -530,9 +530,9 @@ void ALUKA_SetupSwimAnimWTread(Instance *instance)
 }
 
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/aluka/aluka", ALUKA_SwimToDestination);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl ALUKA_SwimToDestination\n.type ALUKA_SwimToDestination, @function\nALUKA_SwimToDestination:\n.include \"asm/nonmatchings/Overlays/aluka/aluka/ALUKA_SwimToDestination.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/aluka/aluka", ALUKA_GetRandomDestination);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl ALUKA_GetRandomDestination\n.type ALUKA_GetRandomDestination, @function\nALUKA_GetRandomDestination:\n.include \"asm/nonmatchings/Overlays/aluka/aluka/ALUKA_GetRandomDestination.s\"\n.set reorder\n.set at\n");
 
 int ALUKA_NearAluka(Instance *instance)
 {
@@ -562,7 +562,7 @@ int ALUKA_NearAluka(Instance *instance)
 }
 
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/aluka/aluka", ALUKA_GetCircleDestination);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl ALUKA_GetCircleDestination\n.type ALUKA_GetCircleDestination, @function\nALUKA_GetCircleDestination:\n.include \"asm/nonmatchings/Overlays/aluka/aluka/ALUKA_GetCircleDestination.s\"\n.set reorder\n.set at\n");
 
 int ALUKA_SwimPlanMovement(Instance *instance, Position *target, Position *step, Level *level)
 {
