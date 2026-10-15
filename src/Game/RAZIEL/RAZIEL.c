@@ -5296,7 +5296,7 @@ void RazielPost(Instance *instance, unsigned long Message, uintptr_t Data)
 
 // Matches 100% on decomp.me but differs on this project
 #ifndef NON_MATCHING
-INCLUDE_ASM("asm/nonmatchings/Game/RAZIEL/RAZIEL", SetStates);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl SetStates\nSetStates:\n.include \"asm/nonmatchings/Game/RAZIEL/RAZIEL/SetStates.s\"\n.set reorder\n.set at\n");
 #else
 int SetStates(Instance *instance, GameTracker *GT, long *controlCommand, int AnalogLength)
 {
@@ -6660,7 +6660,7 @@ void RazielInit(Instance *instance, GameTracker *gameTracker)
     InitStates(instance);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/RAZIEL/RAZIEL", RazielCollide);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl RazielCollide\nRazielCollide:\n.include \"asm/nonmatchings/Game/RAZIEL/RAZIEL/RazielCollide.s\"\n.set reorder\n.set at\n");
 
 void RAZIEL_TurnHead(Instance *instance, short *rotx, short *rotz, GameTracker *gameTracker)
 {

@@ -3058,7 +3058,7 @@ int GetObliqueDirection(Instance *instance, SVector *dir)
     return obliqueFlg;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/PHYSOBS", CollidePhysicalObject);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl CollidePhysicalObject\nCollidePhysicalObject:\n.include \"asm/nonmatchings/Game/PHYSOBS/CollidePhysicalObject.s\"\n.set reorder\n.set at\n");
 
 PhysObWeaponAttributes *PhysObGetWeapon(Instance *instance)
 {
@@ -3524,9 +3524,9 @@ int PHYSOBS_FigureDragForSlope(Instance *instance, int pathNumber, int *result)
     return didSomething;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/PHYSOBS", PHYSOB_CheckThrownLineCollision);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl PHYSOB_CheckThrownLineCollision\nPHYSOB_CheckThrownLineCollision:\n.include \"asm/nonmatchings/Game/PHYSOBS/PHYSOB_CheckThrownLineCollision.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Game/PHYSOBS", PHYSOB_CheckDroppedLineCollision);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl PHYSOB_CheckDroppedLineCollision\nPHYSOB_CheckDroppedLineCollision:\n.include \"asm/nonmatchings/Game/PHYSOBS/PHYSOB_CheckDroppedLineCollision.s\"\n.set reorder\n.set at\n");
 
 int PHYSOB_CheckDirectedLineCollision(Instance *instance, int xoffset, int yoffset, int startZOffset)
 {
@@ -3974,7 +3974,7 @@ int PHYSOB_MoveTowardsAlign(Instance *instance, SVector *orgVec, SVector *endVec
     return theta < 20;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/PHYSOBS", PHYSOB_ReAlignFalling);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl PHYSOB_ReAlignFalling\nPHYSOB_ReAlignFalling:\n.include \"asm/nonmatchings/Game/PHYSOBS/PHYSOB_ReAlignFalling.s\"\n.set reorder\n.set at\n");
 
 void DropPhysOb(Instance *instance, int flags)
 {

@@ -445,9 +445,9 @@ void aadUpdateChannelVolPan(AadSequenceSlot *slot, int channel)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/PSX/AADSEQEV", aadUpdateSlotVolPan);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl aadUpdateSlotVolPan\naadUpdateSlotVolPan:\n.include \"asm/nonmatchings/Game/PSX/AADSEQEV/aadUpdateSlotVolPan.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Game/PSX/AADSEQEV", aadUpdateChannelPitchBend);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl aadUpdateChannelPitchBend\naadUpdateChannelPitchBend:\n.include \"asm/nonmatchings/Game/PSX/AADSEQEV/aadUpdateChannelPitchBend.s\"\n.set reorder\n.set at\n");
 
 void midiPolyphonicAftertouch()
 {

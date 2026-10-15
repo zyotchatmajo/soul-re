@@ -541,7 +541,7 @@ void _GlyphOffProcess(Instance *instance, int data1, int data2)
     Glyph_DoFX(instance);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/GLYPH", _GlyphSelectProcess);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl _GlyphSelectProcess\n_GlyphSelectProcess:\n.include \"asm/nonmatchings/Game/GLYPH/_GlyphSelectProcess.s\"\n.set reorder\n.set at\n");
 
 void Glyph_StartSpell(Instance *instance, int glyphnum)
 {
@@ -579,7 +579,7 @@ void Glyph_StartSpell(Instance *instance, int glyphnum)
     INSTANCE_Post(gameTrackerX.playerInstance, message, 0);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/GLYPH", Glyph_Broadcast);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl Glyph_Broadcast\nGlyph_Broadcast:\n.include \"asm/nonmatchings/Game/GLYPH/Glyph_Broadcast.s\"\n.set reorder\n.set at\n");
 
 void Glyph_DoSpell(Instance *instance, int glyphnum)
 {
