@@ -807,7 +807,7 @@ void aadRelocateMusicMemoryBegin()
     aadMem->flags |= 0x2;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/PSX/AADLIB", aadRelocateMusicMemoryEnd);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl aadRelocateMusicMemoryEnd\naadRelocateMusicMemoryEnd:\n.include \"asm/nonmatchings/Game/PSX/AADLIB/aadRelocateMusicMemoryEnd.s\"\n.set reorder\n.set at\n");
 
 void aadRelocateSfxMemory(void *oldAddress, int offset)
 {
@@ -851,7 +851,7 @@ void aadPurgeLoadQueue()
 
 // Matches 100% on decomp.me but differs on this project
 #ifndef NON_MATCHING
-INCLUDE_ASM("asm/nonmatchings/Game/PSX/AADLIB", aadProcessLoadQueue);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl aadProcessLoadQueue\naadProcessLoadQueue:\n.include \"asm/nonmatchings/Game/PSX/AADLIB/aadProcessLoadQueue.s\"\n.set reorder\n.set at\n");
 #else
 void aadProcessLoadQueue()
 {
@@ -1085,7 +1085,7 @@ void aadLoadDynamicSfxReturn(void *loadedDataPtr, void *data, void *data2)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/PSX/AADLIB", aadWaveMalloc);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl aadWaveMalloc\naadWaveMalloc:\n.include \"asm/nonmatchings/Game/PSX/AADLIB/aadWaveMalloc.s\"\n.set reorder\n.set at\n");
 
 unsigned long aadGetSramBlockAddr(int handle)
 {
@@ -1191,9 +1191,9 @@ void aadFreeSingleDynSfx(int sfxID)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/PSX/AADLIB", setSramFullAlarm);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl setSramFullAlarm\nsetSramFullAlarm:\n.include \"asm/nonmatchings/Game/PSX/AADLIB/setSramFullAlarm.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Game/PSX/AADLIB", aadLoadSingleDynSfx);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl aadLoadSingleDynSfx\naadLoadSingleDynSfx:\n.include \"asm/nonmatchings/Game/PSX/AADLIB/aadLoadSingleDynSfx.s\"\n.set reorder\n.set at\n");
 
 void HackCallback()
 {

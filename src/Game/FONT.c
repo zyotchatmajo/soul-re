@@ -296,11 +296,11 @@ long FONT_Get2DImageIndex(unsigned char c)
     return fontTransTable[c];
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/FONT", drawChar2DPoly);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl drawChar2DPoly\ndrawChar2DPoly:\n.include \"asm/nonmatchings/Game/FONT/drawChar2DPoly.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Game/FONT", FONT_DrawChar2D);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl FONT_DrawChar2D\nFONT_DrawChar2D:\n.include \"asm/nonmatchings/Game/FONT/FONT_DrawChar2D.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Game/FONT", FONT_CharSpacing);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl FONT_CharSpacing\nFONT_CharSpacing:\n.include \"asm/nonmatchings/Game/FONT/FONT_CharSpacing.s\"\n.set reorder\n.set at\n");
 
 void FONT_AddCharToBuffer(char c, long x, long y)
 {
@@ -414,7 +414,7 @@ void FONT_SetCursor(short x, short y)
     fontTracker.font_ypos = y;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/FONT", FONT_VaReallyPrint);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl FONT_VaReallyPrint\nFONT_VaReallyPrint:\n.include \"asm/nonmatchings/Game/FONT/FONT_VaReallyPrint.s\"\n.set reorder\n.set at\n");
 
 void FONT_FontPrintCentered(char *text, long y)
 {
