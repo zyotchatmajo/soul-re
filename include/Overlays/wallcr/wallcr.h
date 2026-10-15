@@ -31,4 +31,6 @@ typedef struct _WallcrVars
     short wallcrFlags;
 } WallcrVars;
 
+void WALLCR_DisableControllers(Instance *instance);
+
 #endif

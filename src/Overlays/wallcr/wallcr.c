@@ -1,4 +1,7 @@
 #include "Overlays/wallcr/wallcr.h"
+#include "Game/MONSTER/MONAPI.h"
+#include "Game/MONSTER/MONSTER.h"
+#include "Game/PHYSICS.h"
 
 /* double-check that WALLCR_ShouldJumpOff and WALLCR_ShouldJumpOn aren't swapped */
 
@@ -49,9 +52,33 @@ INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_ShouldSurpriseAtta
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_MoveToDestination);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Message);
+void WALLCR_Message(Instance *instance, unsigned long message, unsigned long data)
+{
+    MonsterMessage(instance, message, data);
+}
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Query);
+uintptr_t WALLCR_Query(Instance *instance, unsigned long query)
+{
+    uintptr_t ret;
+
+    if (query == 13)
+    {
+        if (instance->matrix != NULL)
+        {
+            ret = (uintptr_t)instance->matrix;
+        }
+        else
+        {
+            ret = 0;
+        }
+    }
+    else
+    {
+        ret = MonsterQuery(instance, query);
+    }
+
+    return ret;
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Init);
 
@@ -77,43 +104,152 @@ INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Wander);
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_FallEntry);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Fall);
+void WALLCR_Fall(Instance *instance)
+{
+    MON_Fall(instance);
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_ImpactEntry);
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Impact);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_GeneralDeathEntry);
+void WALLCR_GeneralDeathEntry(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_GeneralDeath);
+    WALLCR_DisableControllers(instance);
+    mv->mvFlags &= ~0x800;
+    mv->auxFlags &= ~4;
+    instance->zAccl = -16;
+    instance->rotation.y = 0;
+    instance->rotation.x = 0;
+    MON_GeneralDeathEntry(instance);
+}
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_HitEntry);
+void WALLCR_GeneralDeath(Instance *instance)
+{
+    MON_GeneralDeath(instance);
+}
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Hit);
+void WALLCR_HitEntry(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_MissileHitEntry);
+    WALLCR_DisableControllers(instance);
+    mv->mvFlags &= ~0x800;
+    mv->auxFlags &= ~4;
+    instance->zAccl = -16;
+    instance->rotation.y = 0;
+    instance->rotation.x = 0;
+    MON_HitEntry(instance);
+}
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_MissileHit);
+void WALLCR_Hit(Instance *instance)
+{
+    MON_Hit(instance);
+}
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_NoticeEntry);
+void WALLCR_MissileHitEntry(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Notice);
+    WALLCR_DisableControllers(instance);
+    mv->mvFlags &= ~0x800;
+    mv->auxFlags &= ~4;
+    instance->zAccl = -16;
+    instance->rotation.y = 0;
+    instance->rotation.x = 0;
+    MON_MissileHitEntry(instance);
+}
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_SurprisedEntry);
+void WALLCR_MissileHit(Instance *instance)
+{
+    MON_MissileHit(instance);
+}
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Surprised);
+void WALLCR_NoticeEntry(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_StunnedEntry);
+    WALLCR_DisableControllers(instance);
+    mv->mvFlags &= ~0x800;
+    mv->auxFlags &= ~4;
+    instance->zAccl = -16;
+    instance->rotation.y = 0;
+    instance->rotation.x = 0;
+    MON_NoticeEntry(instance);
+}
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Stunned);
+void WALLCR_Notice(Instance *instance)
+{
+    MON_Notice(instance);
+}
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_ThrownEntry);
+void WALLCR_SurprisedEntry(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+
+    WALLCR_DisableControllers(instance);
+    mv->mvFlags &= ~0x800;
+    mv->auxFlags &= ~4;
+    instance->zAccl = -16;
+    instance->rotation.y = 0;
+    instance->rotation.x = 0;
+    MON_SurprisedEntry(instance);
+}
+
+void WALLCR_Surprised(Instance *instance)
+{
+    MON_Surprised(instance);
+}
+
+void WALLCR_StunnedEntry(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+
+    WALLCR_DisableControllers(instance);
+    mv->mvFlags &= ~0x800;
+    mv->auxFlags &= ~4;
+    instance->zAccl = -16;
+    instance->rotation.y = 0;
+    instance->rotation.x = 0;
+    MON_StunnedEntry(instance);
+}
+
+void WALLCR_Stunned(Instance *instance)
+{
+    MON_Stunned(instance);
+}
+
+void WALLCR_ThrownEntry(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+
+    WALLCR_DisableControllers(instance);
+    mv->mvFlags &= ~0x800;
+    mv->auxFlags &= ~4;
+    instance->zAccl = -16;
+    instance->rotation.y = 0;
+    instance->rotation.x = 0;
+    MON_ThrownEntry(instance);
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Thrown);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_PupateEntry);
+void WALLCR_PupateEntry(Instance *instance)
+{
+    MON_PupateEntry(instance);
+}
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Pupate);
+void WALLCR_Pupate(Instance *instance)
+{
+    MON_Pupate(instance);
+
+    if (instance->currentMainState != MONSTER_STATE_PUPATE)
+    {
+        PhysicsSetVelFromRot(instance, &instance->rotation, 15);
+    }
+}
 
 #else
 
