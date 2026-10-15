@@ -64,13 +64,92 @@ INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_NearFloor);
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_FindJumpOnPoint);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_AngleFromPosToPos);
+int WALLCR_AngleFromPosToPos(Position *oldPos, Position *newPos, Rotation *rotation)
+{
+    MATRIX matrix;
+    MATRIX transposed;
+    Position offset;
+
+    matrix.m[0][0] = 4096;
+    matrix.m[0][1] = 0;
+    matrix.m[0][2] = 0;
+    matrix.m[1][0] = 0;
+    matrix.m[1][1] = 4096;
+    matrix.m[1][2] = 0;
+    matrix.m[2][0] = 0;
+    matrix.m[2][1] = 0;
+    matrix.m[2][2] = 4096;
+
+    RotMatrixZ(rotation->z, &matrix);
+    RotMatrixY(rotation->y, &matrix);
+    RotMatrixX(rotation->x, &matrix);
+    TransposeMatrix(&matrix, &transposed);
+
+    COPY_SVEC(Position, &offset, Position, newPos);
+    offset.x -= oldPos->x;
+    offset.y -= oldPos->y;
+    offset.z -= oldPos->z;
+    ApplyMatrixSV(&transposed, (SVECTOR *)&offset, (SVECTOR *)&offset);
+
+    return (ratan2(offset.z, -offset.x) + 3072) & 0xFFF;
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_FollowWall);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_MoveForward);
+int WALLCR_MoveForward(Instance *instance, Position *target)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+    WallcrVars *vars = (WallcrVars *)mv->extraVars;
+    G2SVector3 extraRot;
+    short roll;
+    int angle;
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_ApplySpin);
+    angle = WALLCR_AngleFromPosToPos(&instance->position, target, &instance->rotation);
+    roll = vars->roll;
+    AngleMoveToward(&roll, angle, mv->subAttr->speedRunTurn);
+    extraRot.z = 0;
+    extraRot.x = 0;
+    extraRot.y = roll;
+    G2Anim_SetController_Vector(&instance->anim, 0, G2ANIM_CTRLRTYPE_ADD_LOCALROT, &extraRot);
+    vars->roll = roll;
+
+    if (!WALLCR_FollowWall(instance))
+    {
+        MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 6, 2);
+        mv->auxFlags &= ~8;
+        return 0;
+    }
+
+    if (!(mv->auxFlags & 8))
+    {
+        MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 8, 2);
+        mv->auxFlags |= 8;
+    }
+
+    return 1;
+}
+
+void WALLCR_ApplySpin(Instance *instance, int time)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+    WallcrVars *vars = (WallcrVars *)mv->extraVars;
+
+    instance->rotation.y += (vars->correct_roll_speed * time) / 4096;
+    instance->rotation.x += (vars->pitch_speed * time) / 4096;
+    vars->roll += (vars->roll_speed * time) / 4096;
+
+    if (G2Anim_IsControllerActive(&instance->anim, 1, G2ANIM_CTRLRTYPE_ADD_LOCALTRANS))
+    {
+        G2SVector3 extraRot;
+
+        extraRot.z = 0;
+        extraRot.x = 0;
+        extraRot.y = vars->roll;
+        G2Anim_SetController_Vector(&instance->anim, 0, G2ANIM_CTRLRTYPE_ADD_LOCALROT, &extraRot);
+    }
+
+    instance->rotation.z += (vars->yaw_speed * time) / 4096;
+}
 
 INCLUDE_RODATA("asm/nonmatchings/Overlays/wallcr/wallcr", D_88000000);
 
