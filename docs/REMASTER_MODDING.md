@@ -40,11 +40,21 @@ faces.
 The remaster's larger character and enemy models are stored as SRM files rather
 than PCMs. The viewer now decodes the SR1 SRM mesh layout as well: the installed
 `1/OBJECT` tree contains 349 SRMs and 29 object PCMs, for 378 selectable object
-meshes in total. SRA files are runtime object metadata. SRL files are animation
-matrix streams: after the 20-byte header, each frame contains a fixed number of
-48-byte (3x4 float) bone transforms. The viewer reads those transforms and the
-SRM vertex bone indices/weights, so an SRM placement can be previewed with a
-selected SRL animation.
+meshes in total. SRL files are animation matrix streams: after the 20-byte
+header, each frame contains a fixed number of 48-byte (3x4 float) bone
+transforms. The viewer reads those transforms and the SRM vertex bone
+indices/weights, so an SRM placement can be previewed with a selected SRL
+animation.
+
+SRA files are the original relocatable object animation archives, not AI
+scripts. The viewer's SRA browser reads their root keylist table and exposes
+each embedded clip's key count, duration, section count, and channel-stream
+offsets. For example, `MORBOSS.SRA` contains 14 clips and automatically pairs
+with `MORBOSS_1.SRM` in the viewer. Playing those clips requires decoding the
+original compressed G2 channel streams and mapping the PS1 segment hierarchy to
+the remaster's SRM skeleton; that is a separate decoder task. Monster AI/state
+behavior is in executable overlays and object/event data, so it is not expected
+to be contained in the SRA archive.
 
 The viewer can therefore inspect remaster levels directly:
 
