@@ -35,5 +35,8 @@ void WALLCR_EnableControllers(Instance *instance);
 void WALLCR_DisableControllers(Instance *instance);
 void WALLCR_SetFlex(Instance *instance, int flex);
 void WALLCR_DetachEntry(Instance *instance, Position *target);
+void WALLCR_Detach(Instance *instance);
+int WALLCR_ShouldSurpriseAttack(Instance *instance);
+int WALLCR_MoveToDestination(Instance *instance, Position *target);
 
 #endif

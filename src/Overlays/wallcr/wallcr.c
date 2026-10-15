@@ -6,9 +6,14 @@
 #include "Game/PHYSICS.h"
 #include "Game/MEMPACK.h"
 #include "Game/MATH3D.h"
+#include "Game/GAMELOOP.h"
+#include "Game/STREAM.h"
+#include "Game/PLAN/PLANAPI.h"
 #include "Game/G2/ANMCTRLR.h"
 #include "Game/PLAN/ENMYPLAN.h"
 #include "Game/STATE.h"
+
+void MON_MoveToPosition(Instance *instance, Position *position, short turnSpeed);
 
 /* double-check that WALLCR_ShouldJumpOff and WALLCR_ShouldJumpOn aren't swapped */
 
@@ -202,7 +207,45 @@ void WALLCR_PursueEntry(Instance *instance)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Pursue);
+void WALLCR_Pursue(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+    MonsterIR *enemy = mv->enemy;
+
+    if (mv->mvFlags & 4)
+    {
+        if (mv->auxFlags & 4)
+        {
+            MON_SwitchState(instance, MONSTER_STATE_IDLE);
+            MON_DefaultQueueHandler(instance);
+        }
+        else
+        {
+            MON_Pursue(instance);
+        }
+    }
+    else
+    {
+        mv->auxFlags &= ~0x20;
+        if (WALLCR_ShouldSurpriseAttack(instance))
+        {
+            mv->auxFlags = (mv->auxFlags | 0x20) & ~0x10;
+            MON_SwitchState(instance, MONSTER_STATE_SURPRISEATTACK);
+            MON_DefaultQueueHandler(instance);
+        }
+        else if (WALLCR_MoveToDestination(instance, NULL))
+        {
+            if (enemy != NULL)
+            {
+                COPY_SVEC(Position, &mv->destination, Position, &enemy->instance->position);
+            }
+        }
+        else if (instance->currentMainState == MONSTER_STATE_PURSUE)
+        {
+            MON_Pursue(instance);
+        }
+    }
+}
 
 void WALLCR_SurpriseAttackEntry(Instance *instance)
 {
@@ -235,7 +278,34 @@ void WALLCR_IdleEntry(Instance *instance)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_ShouldIAmbushPlayer);
+int WALLCR_ShouldIAmbushPlayer(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+    Instance *player = gameTrackerX.playerInstance;
+    Position pos;
+
+    if ((signed char)mv->ambushMarker != 0 && mv->ambushArc == 0x800 && mv->ambushElevation == 0x400)
+    {
+        if (!PLANAPI_FindNodePositionInUnit(STREAM_GetStreamUnitWithID(instance->birthStreamUnitID),
+                                            &pos, (signed char)mv->ambushMarker, 4))
+        {
+            return 0;
+        }
+
+        return MATH3D_LengthXYZ(player->position.x - pos.x,
+                                player->position.y - pos.y,
+                                player->position.z - pos.z) < mv->ambushRange;
+    }
+
+    if (instance->currentMainState == MONSTER_STATE_PUPATE)
+    {
+        return 0;
+    }
+
+    return MATH3D_LengthXYZ(player->position.x - instance->position.x,
+                            player->position.y - instance->position.y,
+                            player->position.z - instance->position.z) < mv->ambushRange;
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Idle);
 
@@ -257,7 +327,42 @@ void WALLCR_WanderEntry(Instance *instance)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Wander);
+void WALLCR_Wander(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+
+    if (mv->mvFlags & 4)
+    {
+        Position target;
+
+        if (!WALLCR_MoveToDestination(instance, &target))
+        {
+            if (!MON_AnimPlaying(instance, MONSTER_ANIM_RUN))
+            {
+                MON_PlayAnim(instance, MONSTER_ANIM_RUN, 2);
+            }
+            MON_MoveToPosition(instance, &target, mv->subAttr->speedRunTurn);
+            mv->mvFlags |= 0x20000;
+        }
+
+        if (instance->currentMainState != MONSTER_STATE_FALL &&
+            MATH3D_LengthXYZ(instance->position.x - mv->destination.x,
+                             instance->position.y - mv->destination.y,
+                             instance->position.z - mv->destination.z) < 300)
+        {
+            MON_SwitchState(instance, MONSTER_STATE_IDLE);
+        }
+    }
+    else if (mv->auxFlags & 1)
+    {
+        MON_DefaultQueueHandler(instance);
+        WALLCR_Detach(instance);
+    }
+    else
+    {
+        MON_Wander(instance);
+    }
+}
 
 void WALLCR_FallEntry(Instance *instance)
 {
