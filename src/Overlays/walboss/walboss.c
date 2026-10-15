@@ -124,11 +124,11 @@ __asm__(
     ".include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_BirthEgg.s\"\n.set reorder\n.set at\n"
 );
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_CorrectLookAT);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_CorrectLookAT\n.type WALBOSS_CorrectLookAT, @function\nWALBOSS_CorrectLookAT:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_CorrectLookAT.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_LegHurtEntry);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_LegHurtEntry\n.type WALBOSS_LegHurtEntry, @function\nWALBOSS_LegHurtEntry:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_LegHurtEntry.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_LegHurt);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_LegHurt\n.type WALBOSS_LegHurt, @function\nWALBOSS_LegHurt:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_LegHurt.s\"\n.set reorder\n.set at\n");
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_HitByEggEntry);
 
