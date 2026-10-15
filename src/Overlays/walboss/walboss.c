@@ -148,11 +148,11 @@ INCLUDE_RODATA("asm/nonmatchings/Overlays/walboss/walboss", D_88000020);
 
 INCLUDE_RODATA("asm/nonmatchings/Overlays/walboss/walboss", D_8800002C);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_Init);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_Init\n.type WALBOSS_Init, @function\nWALBOSS_Init:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_Init.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_CleanUp);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_CleanUp\n.type WALBOSS_CleanUp, @function\nWALBOSS_CleanUp:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_CleanUp.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_DamageEffect);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_DamageEffect\n.type WALBOSS_DamageEffect, @function\nWALBOSS_DamageEffect:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_DamageEffect.s\"\n.set reorder\n.set at\n");
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_HandleFade);
 
