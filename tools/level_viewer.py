@@ -260,7 +260,12 @@ def _srm_geometry(path: Path) -> dict[str, object]:
     extra_bone_count = read_u32("extra bone count")
     if extra_bone_count > 128:
         raise ValueError(f"SRM extra bone count is unreasonable: {extra_bone_count}")
-    skip((32 + extra_bone_count) * 48, "bone matrices")
+    bone_count = 32 + extra_bone_count
+    bone_matrices = [
+        struct.unpack_from("<12f", data, offset + index * 48)
+        for index in range(bone_count)
+    ]
+    skip(bone_count * 48, "bone matrices")
     if offset + 4 > len(data):
         raise ValueError("SRM bone transform check is outside the file")
     if struct.unpack_from("<I", data, offset)[0] != 0x80000000:
@@ -284,14 +289,20 @@ def _srm_geometry(path: Path) -> dict[str, object]:
         raise ValueError("SRM geometry extends beyond the file")
 
     vertices: list[tuple[float, float, float]] = []
+    bone_indices: list[tuple[int, int, int]] = []
+    bone_weights: list[tuple[int, int, int]] = []
     bounds_min = [float("inf"), float("inf"), float("inf")]
     bounds_max = [float("-inf"), float("-inf"), float("-inf")]
     for _ in range(vertex_count):
         x, y, z = struct.unpack_from("<3f", data, offset)
+        vertex_bone_indices = tuple(data[offset + 20 : offset + 23])
+        vertex_bone_weights = tuple(data[offset + 25 : offset + 28])
         offset += 32
         if not all(math.isfinite(value) for value in (x, y, z)):
             raise ValueError("SRM contains a non-finite vertex")
         vertices.append((x, y, z))
+        bone_indices.append(vertex_bone_indices)
+        bone_weights.append(vertex_bone_weights)
         bounds_min[0] = min(bounds_min[0], x)
         bounds_min[1] = min(bounds_min[1], y)
         bounds_min[2] = min(bounds_min[2], z)
@@ -315,6 +326,7 @@ def _srm_geometry(path: Path) -> dict[str, object]:
         "texture_count": texture_count,
         "textures": texture_names,
         "extra_bone_count": extra_bone_count,
+        "bone_count": bone_count,
         "vertex_count": vertex_count,
         "face_count": face_count // 3,
         "bounds_min": tuple(bounds_min),
@@ -327,7 +339,59 @@ def _srm_geometry(path: Path) -> dict[str, object]:
         "summary": summary,
         "vertices": vertices,
         "faces": faces,
+        "bone_matrices": bone_matrices,
+        "bone_indices": bone_indices,
+        "bone_weights": bone_weights,
         "markers": [],
+    }
+
+
+def _srl_animation(path: Path) -> dict[str, object]:
+    """Decode the remaster SRL matrix stream used by scripted animations.
+
+    SRL stores a contiguous frame-major array of 3x4 affine matrices.  The
+    first header value is the number of animated channels, the third is the
+    frame count, and each channel/frame record is 48 bytes (12 little-endian
+    floats).  The fourth value is the source skeleton channel limit and is
+    retained as metadata for diagnostics.
+    """
+    data = path.read_bytes()
+    if len(data) < 20 or data[:4] != b"SRL\x02":
+        raise ValueError("SRL has an unsupported magic/version")
+    channel_count, flags, frame_count, skeleton_limit = struct.unpack_from("<4I", data, 4)
+    payload = len(data) - 20
+    if not 1 <= channel_count <= 128 or not 1 <= frame_count <= 10000:
+        raise ValueError("SRL animation dimensions are unreasonable")
+    expected = channel_count * frame_count * 48
+    if payload != expected:
+        raise ValueError(
+            f"SRL payload size mismatch: expected {expected} bytes, found {payload}"
+        )
+    frames: list[list[tuple[float, ...]]] = []
+    offset = 20
+    for _frame in range(frame_count):
+        frame: list[tuple[float, ...]] = []
+        for _channel in range(channel_count):
+            matrix = struct.unpack_from("<12f", data, offset)
+            if not all(math.isfinite(value) for value in matrix):
+                raise ValueError("SRL contains a non-finite transform")
+            frame.append(matrix)
+            offset += 48
+        frames.append(frame)
+    return {
+        "format": "soul-re-view-animation-v1",
+        "asset_type": "srl",
+        "path": path.as_posix(),
+        "summary": {
+            "path": str(path),
+            "file_size": len(data),
+            "channel_count": channel_count,
+            "frame_count": frame_count,
+            "skeleton_limit": skeleton_limit,
+            "flags": flags,
+            "duration_frames": frame_count,
+        },
+        "frames": frames,
     }
 
 
@@ -366,6 +430,19 @@ def _safe_object_asset(root: Path | None, requested: str) -> Path:
         raise ValueError("object asset path escapes the configured object root") from exc
     if candidate.suffix.lower() not in {".pcm", ".srm"} or not candidate.is_file():
         raise FileNotFoundError(f"object PCM/SRM not found: {requested}")
+    return candidate
+
+
+def _safe_animation_asset(root: Path | None, requested: str) -> Path:
+    if root is None:
+        raise FileNotFoundError("object asset root is not configured")
+    candidate = (root / unquote(requested)).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("animation asset path escapes the configured object root") from exc
+    if candidate.suffix.lower() != ".srl" or not candidate.is_file():
+        raise FileNotFoundError(f"SRL animation not found: {requested}")
     return candidate
 
 
@@ -441,6 +518,17 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 )
                 self._json(HTTPStatus.OK, assets)
                 return
+            if parsed.path == "/api/animation-list":
+                if self.object_root is None:
+                    self._json(HTTPStatus.OK, [])
+                    return
+                assets = sorted(
+                    path.relative_to(self.object_root).as_posix()
+                    for path in self.object_root.rglob("*")
+                    if path.is_file() and path.suffix.lower() == ".srl"
+                )
+                self._json(HTTPStatus.OK, assets)
+                return
             if parsed.path == "/api/object":
                 requested = parse_qs(parsed.query).get("path", [""])[0]
                 if not requested:
@@ -448,6 +536,12 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 source = _safe_object_asset(self.object_root, requested)
                 geometry = _pcm_geometry(source) if source.suffix.lower() == ".pcm" else _srm_geometry(source)
                 self._json(HTTPStatus.OK, geometry)
+                return
+            if parsed.path == "/api/animation":
+                requested = parse_qs(parsed.query).get("path", [""])[0]
+                if not requested:
+                    raise ValueError("missing SRL animation path")
+                self._json(HTTPStatus.OK, _srl_animation(_safe_animation_asset(self.object_root, requested)))
                 return
             if parsed.path == "/api/write-status":
                 self._json(

@@ -40,8 +40,11 @@ faces.
 The remaster's larger character and enemy models are stored as SRM files rather
 than PCMs. The viewer now decodes the SR1 SRM mesh layout as well: the installed
 `1/OBJECT` tree contains 349 SRMs and 29 object PCMs, for 378 selectable object
-meshes in total. SRA files are runtime object metadata and SRL files are stream/
-animation resources; neither is itself a standalone renderable mesh.
+meshes in total. SRA files are runtime object metadata. SRL files are animation
+matrix streams: after the 20-byte header, each frame contains a fixed number of
+48-byte (3x4 float) bone transforms. The viewer reads those transforms and the
+SRM vertex bone indices/weights, so an SRM placement can be previewed with a
+selected SRL animation.
 
 The viewer can therefore inspect remaster levels directly:
 
@@ -60,6 +63,11 @@ append its `object` entries to a staged scene's runtime intro table when
 started with `--write-root`. Each apply makes a timestamped backup. The mesh
 stem is written as the runtime's 16-byte object name; non-object placement
 kinds remain sidecar-only until their table formats are decoded.
+
+For a skeletal preview, choose an SRM in the object field, choose an SRL in the
+animation field, and enable **play animation**. The animation selector is kept
+on the placement and is included in exported placement JSON; it does not alter
+the game asset until the placement is applied to the AREA scene.
 
 ## What we can mod first
 
