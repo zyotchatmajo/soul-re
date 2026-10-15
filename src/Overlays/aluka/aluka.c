@@ -175,7 +175,7 @@ int ALUKA_NotDaylight(Level *level)
 
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/aluka/aluka", ALUKA_CapDepth);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl ALUKA_CapDepth\n.type ALUKA_CapDepth, @function\nALUKA_CapDepth:\n.include \"asm/nonmatchings/Overlays/aluka/aluka/ALUKA_CapDepth.s\"\n.set reorder\n.set at\n");
 
 int ALUKA_AngleTooWide(Position *first, Position *second, int cosmult, int cosshift)
 {
@@ -376,7 +376,7 @@ void ALUKA_MoveForward(Instance *instance, int time, int depth)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/aluka/aluka", ALUKA_FixPitch);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl ALUKA_FixPitch\n.type ALUKA_FixPitch, @function\nALUKA_FixPitch:\n.include \"asm/nonmatchings/Overlays/aluka/aluka/ALUKA_FixPitch.s\"\n.set reorder\n.set at\n");
 
 void ALUKA_ProportionalLimitsAndAccels(Instance *instance, int angley, int anglep)
 {
