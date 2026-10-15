@@ -156,19 +156,19 @@ __asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_DamageEffect\
 
 __asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_HandleFade\n.type WALBOSS_HandleFade, @function\nWALBOSS_HandleFade:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_HandleFade.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_IdleEntry);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_IdleEntry\n.type WALBOSS_IdleEntry, @function\nWALBOSS_IdleEntry:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_IdleEntry.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_Idle);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_Idle\n.type WALBOSS_Idle, @function\nWALBOSS_Idle:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_Idle.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_NoticeEntry);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_NoticeEntry\n.type WALBOSS_NoticeEntry, @function\nWALBOSS_NoticeEntry:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_NoticeEntry.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_Notice);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_Notice\n.type WALBOSS_Notice, @function\nWALBOSS_Notice:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_Notice.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_CombatEntry);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_CombatEntry\n.type WALBOSS_CombatEntry, @function\nWALBOSS_CombatEntry:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_CombatEntry.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_Combat);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_Combat\n.type WALBOSS_Combat, @function\nWALBOSS_Combat:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_Combat.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_AttackEntry);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_AttackEntry\n.type WALBOSS_AttackEntry, @function\nWALBOSS_AttackEntry:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_AttackEntry.s\"\n.set reorder\n.set at\n");
 
 __asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_Attack\n.type WALBOSS_Attack, @function\nWALBOSS_Attack:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_Attack.s\"\n.set reorder\n.set at\n");
 
