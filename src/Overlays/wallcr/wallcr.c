@@ -557,7 +557,36 @@ void WALLCR_Fall(Instance *instance)
     MON_Fall(instance);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_ImpactEntry);
+void WALLCR_ImpactEntry(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+    WallcrVars *vars = (WallcrVars *)mv->extraVars;
+
+    if (vars != NULL)
+    {
+        if (WALLCR_FollowWall(instance) && instance->tface->textoff != 0xFFFF &&
+            (((TextureFT3 *)((char *)((Level *)instance->tfaceLevel)->terrain->StartTextureList + instance->tface->textoff))->attr & 0x800))
+        {
+            MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 2, 1);
+            instance->zAccl = 0;
+            instance->zVel = 0;
+            instance->yVel = 0;
+            instance->xVel = 0;
+            vars->roll = 0;
+            vars->pitch_speed = 0;
+            vars->roll_speed = 0;
+            vars->yaw_speed = 0;
+            instance->checkMask &= ~0x20;
+            mv->mvFlags |= 0x800;
+            mv->auxFlags &= ~8;
+            mv->mvFlags &= ~2;
+        }
+        else
+        {
+            MON_ImpactEntry(instance);
+        }
+    }
+}
 
 void WALLCR_Impact(Instance *instance)
 {
