@@ -26,6 +26,7 @@ python tools/level_editor.py --area city
 python tools/level_editor.py --manifest build/level-inventory.json
 python tools/level_editor.py --inspect city/bin/city2.drm
 python tools/level_editor.py --inspect city/bin/city2.drm --obj build/city2-terrain.obj
+python tools/level_editor.py --inspect city/bin/city2.drm --scene build/city2-scene.json --svg build/city2-preview.svg
 ```
 
 The report groups files by area and identifies the companion asset types:
@@ -36,7 +37,9 @@ future parser changes can be regression-tested against the extracted data.
 The DRM inspector validates the relocation-table boundary, reads the serialized
 `Level`/`Terrain` headers, reports geometry counts and bounds, and can export
 the terrain vertex/face arrays to a coordinate-only Wavefront OBJ. The OBJ is
-an inspection export; it does not replace the original game asset.
+an inspection export; it does not replace the original game asset. It also
+extracts intro, planning, and sound markers into JSON and draws a dependency-
+free top-down SVG preview with those markers labeled.
 
 ## Desktop browser
 

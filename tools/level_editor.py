@@ -56,6 +56,17 @@ class DrmSummary:
     bounds_max: tuple[int, int, int]
 
 
+@dataclass(frozen=True)
+class SceneMarker:
+    kind: str
+    name: str
+    identifier: int
+    x: int
+    y: int
+    z: int
+    flags: int
+
+
 def _strip_duplicate(stem: str) -> str:
     return DUPLICATE_RE.sub("", stem)
 
@@ -239,6 +250,180 @@ def _parse_drm(path: Path) -> DrmSummary:
     )
 
 
+def _parse_scene_markers(path: Path) -> list[SceneMarker]:
+    """Read the relocatable Intro, plan-marker, and SFX-marker arrays."""
+    data = path.read_bytes()
+    module_offset, _ = _module_offset(data)
+    module_size = len(data) - module_offset
+
+    def u32(relative: int) -> int:
+        return struct.unpack_from("<I", data, module_offset + relative)[0]
+
+    def i32(relative: int) -> int:
+        return struct.unpack_from("<i", data, module_offset + relative)[0]
+
+    def i16(relative: int) -> int:
+        return struct.unpack_from("<h", data, module_offset + relative)[0]
+
+    def checked_array(relative: int, count: int, item_size: int, label: str) -> int:
+        if count < 0:
+            raise ValueError(f"{label} count is negative")
+        if not count:
+            return 0
+        if relative == 0 or relative + count * item_size > module_size:
+            raise ValueError(f"{label} array extends beyond DRM module")
+        return relative
+
+    terrain_relative = u32(0)
+    if terrain_relative >= module_size:
+        raise ValueError("terrain pointer is outside DRM module")
+    terrain_file = module_offset + terrain_relative
+    intro_count = i32(terrain_relative + 0x08)
+    intro_relative = u32(terrain_relative + 0x0C)
+    plan_count = i32(0xE0)
+    plan_relative = u32(0xE4)
+    sfx_count = i32(0xE8)
+    sfx_relative = u32(0xEC)
+    checked_array(intro_relative, intro_count, 0x4C, "intro")
+    checked_array(plan_relative, plan_count, 0x08, "plan marker")
+    checked_array(sfx_relative, sfx_count, 0x24, "SFX marker")
+
+    markers: list[SceneMarker] = []
+    for index in range(intro_count):
+        relative = intro_relative + index * 0x4C
+        raw_name = data[module_offset + relative : module_offset + relative + 16]
+        name = raw_name.split(b"\0", 1)[0].decode("ascii", errors="replace")
+        markers.append(
+            SceneMarker(
+                kind="intro",
+                name=name or f"intro_{index}",
+                identifier=i32(relative + 0x14),
+                x=i16(relative + 0x20),
+                y=i16(relative + 0x22),
+                z=i16(relative + 0x24),
+                flags=i32(relative + 0x2C),
+            )
+        )
+    for index in range(plan_count):
+        relative = plan_relative + index * 0x08
+        markers.append(
+            SceneMarker(
+                kind="plan",
+                name=f"plan_{index}",
+                identifier=i16(relative + 0x06),
+                x=i16(relative),
+                y=i16(relative + 0x02),
+                z=i16(relative + 0x04),
+                flags=0,
+            )
+        )
+    for index in range(sfx_count):
+        relative = sfx_relative + index * 0x24
+        markers.append(
+            SceneMarker(
+                kind="sfx",
+                name=f"sfx_{index}",
+                identifier=i32(relative + 0x04),
+                x=i16(relative + 0x14),
+                y=i16(relative + 0x16),
+                z=i16(relative + 0x18),
+                flags=i32(relative + 0x1C),
+            )
+        )
+    return markers
+
+
+def _export_scene_json(path: Path, destination: Path) -> None:
+    summary = _parse_drm(path)
+    markers = _parse_scene_markers(path)
+    payload = {
+        "format": "soul-re-scene-v1",
+        "source": str(path),
+        "summary": asdict(summary),
+        "markers": [asdict(marker) for marker in markers],
+    }
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _export_svg(path: Path, destination: Path) -> DrmSummary:
+    """Export a dependency-free top-down terrain and marker preview as SVG."""
+    data = path.read_bytes()
+    module_offset, _ = _module_offset(data)
+    module_size = len(data) - module_offset
+
+    def u32(relative: int) -> int:
+        return struct.unpack_from("<I", data, module_offset + relative)[0]
+
+    def i32(relative: int) -> int:
+        return struct.unpack_from("<i", data, module_offset + relative)[0]
+
+    terrain_relative = u32(0)
+    terrain_file = module_offset + terrain_relative
+    num_vertices = i32(terrain_relative + 0x10)
+    num_faces = i32(terrain_relative + 0x14)
+    vertex_relative = struct.unpack_from("<I", data, terrain_file + 0x1C)[0]
+    face_relative = struct.unpack_from("<I", data, terrain_file + 0x20)[0]
+    if num_vertices < 0 or num_faces < 0:
+        raise ValueError("DRM contains a negative geometry count")
+    if vertex_relative + num_vertices * 12 > module_size or face_relative + num_faces * 12 > module_size:
+        raise ValueError("geometry arrays extend beyond DRM module")
+
+    vertices = [
+        struct.unpack_from("<hhh", data, module_offset + vertex_relative + index * 12)
+        for index in range(num_vertices)
+    ]
+    faces = [
+        struct.unpack_from("<HHH", data, module_offset + face_relative + index * 12)
+        for index in range(num_faces)
+    ]
+    summary = _parse_drm(path)
+    markers = _parse_scene_markers(path)
+    width, height, margin = 1400, 900, 28
+    min_x, min_y, _ = summary.bounds_min
+    max_x, max_y, _ = summary.bounds_max
+    span_x = max(max_x - min_x, 1)
+    span_y = max(max_y - min_y, 1)
+
+    def project(x: int, y: int) -> tuple[float, float]:
+        px = margin + (x - min_x) * (width - 2 * margin) / span_x
+        py = height - margin - (y - min_y) * (height - 2 * margin) / span_y
+        return px, py
+
+    def marker_color(kind: str) -> str:
+        return {"intro": "#E45756", "plan": "#4C78A8", "sfx": "#F2CF5B"}.get(kind, "#FFFFFF")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("w", encoding="utf-8") as stream:
+        stream.write(
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+            f'viewBox="0 0 {width} {height}">\n'
+        )
+        stream.write('<rect width="100%" height="100%" fill="#111827"/>\n')
+        stream.write('<g fill="#2D6A4F" fill-opacity="0.23" stroke="#84A98C" stroke-opacity="0.35" stroke-width="0.45">\n')
+        for v0, v1, v2 in faces:
+            if v0 >= num_vertices or v1 >= num_vertices or v2 >= num_vertices:
+                continue
+            points = " ".join(f"{x:.2f},{y:.2f}" for x, y in (project(*vertices[v0][:2]), project(*vertices[v1][:2]), project(*vertices[v2][:2])))
+            stream.write(f'<polygon points="{points}"/>\n')
+        stream.write("</g>\n")
+        stream.write('<g stroke="#F8FAFC" stroke-width="1.4" fill="none">\n')
+        stream.write(f'<rect x="{margin}" y="{margin}" width="{width - margin * 2}" height="{height - margin * 2}"/>\n</g>\n')
+        stream.write('<g font-family="Segoe UI, sans-serif" font-size="12">\n')
+        for marker in markers:
+            x, y = project(marker.x, marker.y)
+            color = marker_color(marker.kind)
+            stream.write(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="4" fill="{color}" stroke="#111827"/>\n')
+            stream.write(f'<text x="{x + 7:.2f}" y="{y - 6:.2f}" fill="{color}">{marker.kind}: {marker.name}</text>\n')
+        stream.write("</g>\n")
+        stream.write(
+            '<g font-family="Segoe UI, sans-serif" font-size="16" fill="#F8FAFC">'
+            f'<text x="{margin}" y="20">{path.name} — top-down terrain preview</text></g>\n'
+        )
+        stream.write("</svg>\n")
+    return summary
+
+
 def _export_obj(path: Path, destination: Path) -> DrmSummary:
     """Export the terrain vertex/face arrays as a coordinate-only OBJ."""
     data = path.read_bytes()
@@ -293,6 +478,22 @@ def print_drm_summary(summary: DrmSummary) -> None:
         f"SFX={summary.sfx_marker_count:,}"
     )
     print(f"Bounds: min={summary.bounds_min}, max={summary.bounds_max}")
+
+
+def print_marker_summary(markers: Iterable[SceneMarker]) -> None:
+    markers = list(markers)
+    by_kind: dict[str, int] = defaultdict(int)
+    for marker in markers:
+        by_kind[marker.kind] += 1
+    counts = ", ".join(f"{kind}={count}" for kind, count in sorted(by_kind.items())) or "none"
+    print(f"Markers: {counts}")
+    for marker in markers[:12]:
+        print(
+            f"  {marker.kind:5} {marker.name:16} id={marker.identifier:6} "
+            f"pos=({marker.x:6}, {marker.y:6}, {marker.z:6}) flags=0x{marker.flags:X}"
+        )
+    if len(markers) > 12:
+        print(f"  ... {len(markers) - 12} more (use --scene for all markers)")
 
 
 def launch_gui(assets: list[Asset], root: Path) -> int:
@@ -390,6 +591,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         type=Path,
         help="export the inspected DRM terrain to an OBJ file",
     )
+    parser.add_argument(
+        "--scene",
+        type=Path,
+        help="export inspected DRM marker metadata to JSON",
+    )
+    parser.add_argument(
+        "--svg",
+        type=Path,
+        help="export an inspected DRM top-down terrain/marker preview as SVG",
+    )
     parser.add_argument("--gui", action="store_true", help="open the desktop browser after scanning")
     args = parser.parse_args(argv)
 
@@ -403,9 +614,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         try:
             summary = _parse_drm(inspect_path)
             print_drm_summary(summary)
+            markers = _parse_scene_markers(inspect_path)
+            print_marker_summary(markers)
             if args.obj:
                 _export_obj(inspect_path, args.obj)
                 print(f"OBJ: {args.obj} ({args.obj.stat().st_size:,} bytes)")
+            if args.scene:
+                _export_scene_json(inspect_path, args.scene)
+                print(f"Scene: {args.scene} ({args.scene.stat().st_size:,} bytes)")
+            if args.svg:
+                _export_svg(inspect_path, args.svg)
+                print(f"SVG: {args.svg} ({args.svg.stat().st_size:,} bytes)")
         except (OSError, ValueError, struct.error) as error:
             parser.error(str(error))
         return 0
