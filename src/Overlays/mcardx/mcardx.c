@@ -256,23 +256,23 @@ int func_88001DBC(mcmenu_t *mcmenu, int index)
 	return func_880013DC(mcmenu, index, 0);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_88001E14);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88001E14\nfunc_88001E14:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_88001E14.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_88001EF8);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88001EF8\nfunc_88001EF8:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_88001EF8.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_88001F64);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88001F64\nfunc_88001F64:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_88001F64.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_8800213C);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_8800213C\nfunc_8800213C:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_8800213C.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_88002164);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88002164\nfunc_88002164:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_88002164.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_880021D0);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_880021D0\nfunc_880021D0:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_880021D0.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_8800228C);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_8800228C\nfunc_8800228C:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_8800228C.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_88002298);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88002298\nfunc_88002298:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_88002298.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_880022DC);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_880022DC\nfunc_880022DC:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_880022DC.s\"\n.set reorder\n.set at\n");
 
 #else
 
