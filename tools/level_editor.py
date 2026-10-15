@@ -59,6 +59,7 @@ class DrmSummary:
 @dataclass(frozen=True)
 class SceneMarker:
     kind: str
+    index: int
     name: str
     identifier: int
     x: int
@@ -296,6 +297,7 @@ def _parse_scene_markers(path: Path) -> list[SceneMarker]:
         markers.append(
             SceneMarker(
                 kind="intro",
+                index=index,
                 name=name or f"intro_{index}",
                 identifier=i32(relative + 0x14),
                 x=i16(relative + 0x20),
@@ -309,6 +311,7 @@ def _parse_scene_markers(path: Path) -> list[SceneMarker]:
         markers.append(
             SceneMarker(
                 kind="plan",
+                index=index,
                 name=f"plan_{index}",
                 identifier=i16(relative + 0x06),
                 x=i16(relative),
@@ -322,6 +325,7 @@ def _parse_scene_markers(path: Path) -> list[SceneMarker]:
         markers.append(
             SceneMarker(
                 kind="sfx",
+                index=index,
                 name=f"sfx_{index}",
                 identifier=i32(relative + 0x04),
                 x=i16(relative + 0x14),
@@ -344,6 +348,69 @@ def _export_scene_json(path: Path, destination: Path) -> None:
     }
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _patch_scene(source: Path, scene_path: Path, destination: Path) -> int:
+    """Apply marker positions from a scene JSON to a new DRM copy."""
+    payload = json.loads(scene_path.read_text(encoding="utf-8"))
+    if payload.get("format") != "soul-re-scene-v1":
+        raise ValueError("scene JSON format is not soul-re-scene-v1")
+    requested = payload.get("markers")
+    if not isinstance(requested, list):
+        raise ValueError("scene JSON markers must be an array")
+
+    data = bytearray(source.read_bytes())
+    module_offset, _ = _module_offset(data)
+    module_size = len(data) - module_offset
+
+    def u32(relative: int) -> int:
+        return struct.unpack_from("<I", data, module_offset + relative)[0]
+
+    def i32(relative: int) -> int:
+        return struct.unpack_from("<i", data, module_offset + relative)[0]
+
+    terrain_relative = u32(0)
+    terrain_file = module_offset + terrain_relative
+    intro_count = i32(terrain_relative + 0x08)
+    intro_relative = u32(terrain_relative + 0x0C)
+    plan_count = i32(0xE0)
+    plan_relative = u32(0xE4)
+    sfx_count = i32(0xE8)
+    sfx_relative = u32(0xEC)
+    counts = {"intro": intro_count, "plan": plan_count, "sfx": sfx_count}
+    bases = {"intro": intro_relative, "plan": plan_relative, "sfx": sfx_relative}
+    strides = {"intro": 0x4C, "plan": 0x08, "sfx": 0x24}
+    position_offsets = {"intro": 0x20, "plan": 0x00, "sfx": 0x14}
+    position_sizes = {"intro": 0x4C, "plan": 0x08, "sfx": 0x24}
+
+    def validate_coordinate(value: object, label: str) -> int:
+        if not isinstance(value, int) or not -32768 <= value <= 32767:
+            raise ValueError(f"{label} must be a signed 16-bit integer")
+        return value
+
+    changed = 0
+    for marker in requested:
+        if not isinstance(marker, dict):
+            raise ValueError("each marker must be an object")
+        kind = marker.get("kind")
+        index = marker.get("index")
+        if kind not in counts or not isinstance(index, int) or not 0 <= index < counts[kind]:
+            raise ValueError(f"invalid marker slot: {kind!r} index={index!r}")
+        coords = marker.get("x"), marker.get("y"), marker.get("z")
+        x, y, z = (validate_coordinate(value, f"{kind}[{index}].{axis}") for value, axis in zip(coords, "xyz"))
+        relative = bases[kind] + index * strides[kind] + position_offsets[kind]
+        if relative + position_sizes[kind] > module_size:
+            raise ValueError(f"{kind}[{index}] position is outside DRM module")
+        struct.pack_into("<hhh", data, module_offset + relative, x, y, z)
+        changed += 1
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(data)
+    # Re-parse both the source copy and the result to ensure the output still
+    # has a valid serialized marker layout.
+    _parse_drm(destination)
+    _parse_scene_markers(destination)
+    return changed
 
 
 def _export_svg(path: Path, destination: Path) -> DrmSummary:
@@ -489,7 +556,7 @@ def print_marker_summary(markers: Iterable[SceneMarker]) -> None:
     print(f"Markers: {counts}")
     for marker in markers[:12]:
         print(
-            f"  {marker.kind:5} {marker.name:16} id={marker.identifier:6} "
+            f"  {marker.kind:5}[{marker.index:3}] {marker.name:16} id={marker.identifier:6} "
             f"pos=({marker.x:6}, {marker.y:6}, {marker.z:6}) flags=0x{marker.flags:X}"
         )
     if len(markers) > 12:
@@ -601,6 +668,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         type=Path,
         help="export an inspected DRM top-down terrain/marker preview as SVG",
     )
+    parser.add_argument(
+        "--patch-scene",
+        type=Path,
+        help="apply marker coordinates from a scene JSON to a new DRM copy",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="destination for --patch-scene (must not be the source DRM)",
+    )
     parser.add_argument("--gui", action="store_true", help="open the desktop browser after scanning")
     args = parser.parse_args(argv)
 
@@ -625,6 +702,15 @@ def main(argv: Optional[list[str]] = None) -> int:
             if args.svg:
                 _export_svg(inspect_path, args.svg)
                 print(f"SVG: {args.svg} ({args.svg.stat().st_size:,} bytes)")
+            if args.patch_scene:
+                if not args.output:
+                    parser.error("--patch-scene requires --output")
+                output_path = args.output.resolve()
+                if output_path == inspect_path:
+                    parser.error("--output must be a new DRM path; the source is never overwritten")
+                changed = _patch_scene(inspect_path, args.patch_scene, output_path)
+                print(f"Patched markers: {changed}")
+                print(f"DRM copy: {output_path} ({output_path.stat().st_size:,} bytes)")
         except (OSError, ValueError, struct.error) as error:
             parser.error(str(error))
         return 0

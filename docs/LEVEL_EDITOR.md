@@ -41,6 +41,24 @@ an inspection export; it does not replace the original game asset. It also
 extracts intro, planning, and sound markers into JSON and draws a dependency-
 free top-down SVG preview with those markers labeled.
 
+## Safe marker edits
+
+The scene JSON is also the first editable sidecar format. Change only the
+`x`, `y`, or `z` values for a marker, then write a new DRM copy:
+
+```bash
+python tools/level_editor.py \
+  --inspect city/bin/city2.drm \
+  --patch-scene build/city2-scene-edited.json \
+  --output build/city2-edited.drm
+```
+
+The command validates every marker slot and signed 16-bit coordinate, patches
+only marker position fields, re-parses the result, and refuses to overwrite the
+source DRM. Geometry, relocation entries, and all other fields are unchanged.
+The new DRM still needs to be packed into a BIGFILE before an emulator can run
+it; that packing step is intentionally the next validation milestone.
+
 ## Desktop browser
 
 ```bash
