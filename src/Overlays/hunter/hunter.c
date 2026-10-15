@@ -80,7 +80,7 @@ void HUNTER_InitFlamethrow(Instance *instance)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/hunter/hunter", HUNTER_Flamethrow);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl HUNTER_Flamethrow\n.type HUNTER_Flamethrow, @function\nHUNTER_Flamethrow:\n.include \"asm/nonmatchings/Overlays/hunter/hunter/HUNTER_Flamethrow.s\"\n.set reorder\n.set at\n");
 
 void HUNTER_Init(Instance *instance)
 {
