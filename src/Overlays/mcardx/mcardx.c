@@ -80,9 +80,9 @@ void func_880006B8(mcpsx_t *mcpsx)
 	}
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_88000700);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88000700\nfunc_88000700:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_88000700.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_8800076C);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_8800076C\nfunc_8800076C:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_8800076C.s\"\n.set reorder\n.set at\n");
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_88000790);
 
