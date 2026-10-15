@@ -30,9 +30,10 @@ python tools/level_editor.py --inspect city/bin/city2.drm --scene build/city2-sc
 ```
 
 The report groups files by area and identifies the companion asset types:
-`.drm` object data, `.crm` room data, `.smf` streamed model data, and `.snf`
-stream metadata. The manifest includes sizes, headers, and SHA-1 hashes so
-future parser changes can be regression-tested against the extracted data.
+`.drm`/`.pcm` scene and object data, `.crm` room data, `.smf` streamed model
+data, and `.snf` stream metadata. The manifest includes sizes, headers, and
+SHA-1 hashes so future parser changes can be regression-tested against the
+extracted data.
 
 The DRM inspector validates the relocation-table boundary, reads the serialized
 `Level`/`Terrain` headers, reports geometry counts and bounds, and can export
@@ -82,8 +83,9 @@ need to see decoded DRM geometry and markers in 3D.
 
 ## Interactive 3D viewer
 
-The extracted DRM terrain can also be inspected in a local WebGL viewer. It
-does not require Node, a package install, or an internet connection:
+The extracted DRM terrain and PCM assets can also be inspected in a local
+WebGL viewer. It does not require Node, a package install, or an internet
+connection:
 
 ```bash
 python tools/level_viewer.py --open
@@ -91,11 +93,13 @@ python tools/level_viewer.py --open
 
 If the browser does not open automatically, visit the URL printed by the
 command. Drag the canvas to orbit, hold Shift while dragging to pan, and use
-the mouse wheel to zoom. The asset selector lists every extracted `.drm`, and
-the sidebar reports geometry bounds and scene markers. The `wireframe overlay`
-and `scene markers` checkboxes are display-only; source files are never changed.
+the mouse wheel to zoom. The asset selector lists every extracted `.drm` and
+`.pcm`. Area PCMs are decoded as scene terrain with markers; object PCMs are
+decoded as standalone model meshes. The `wireframe overlay` and `scene
+markers` checkboxes are display-only; source files are never changed.
 
-The server accepts an alternate extraction root or initial asset when needed:
+The server accepts an alternate extraction root or initial asset when needed
+(`--drm` is retained as the option name for compatibility):
 
 ```bash
 python tools/level_viewer.py \
@@ -110,11 +114,11 @@ and export a `soul-re-placement-v1` JSON sidecar. These placements are
 currently viewer data; they do not overwrite the DRM or claim to be game
 runtime objects until the DRM object-instance tables are decoded.
 
-## Direct loose-DRM testing
+## Direct loose scene testing
 
 For a copied/staged PC remaster install, pass an explicit write root to enable
 the marker editor's `Apply to AREA` button. The server refuses direct writes
-unless this flag is present, and every changed DRM receives a timestamped
+unless this flag is present, and every changed scene asset receives a timestamped
 `.bak-YYYYMMDD-HHMMSS` backup first:
 
 ```powershell
@@ -126,17 +130,27 @@ python tools/level_viewer.py `
 ```
 
 Select a marker, edit its X/Y/Z fields, and click `Apply to AREA`. This writes
-only marker coordinates through the existing safe DRM patcher. Custom object
+only marker coordinates through the existing safe scene patcher. Custom object
 placements still export as JSON and are not written into runtime object tables.
 
-The same viewer and DRM tools work against the PC remaster's loose `AREA`
-directory. For example, the installed `city9.drm` was parsed successfully
-with the original relocation layout, geometry arrays, and marker structures:
+The same viewer and DRM/PCM tools work against the PC remaster's loose `AREA`
+directory. For example, the installed `city9.drm` and `ALUKA/aluka10.pcm`
+were parsed successfully with the original relocation layout, geometry arrays,
+and marker structures:
 
 ```powershell
 python tools/level_viewer.py `
   --root 'F:\SteamLibrary\steamapps\common\Soul Reaver I-II\1\AREA' `
   --drm CITY/BIN/city9.drm `
+  --open
+```
+
+To inspect an area PCM directly, use the same command with its relative path:
+
+```powershell
+python tools/level_viewer.py `
+  --root 'F:\SteamLibrary\steamapps\common\Soul Reaver I-II\1\AREA' `
+  --drm ALUKA/BIN/aluka10.pcm `
   --open
 ```
 

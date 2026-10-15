@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 
-SUPPORTED_EXTENSIONS = {".drm", ".crm", ".smf", ".snf", ".tim", ".smp", ".snd"}
+SUPPORTED_EXTENSIONS = {".drm", ".pcm", ".crm", ".smf", ".snf", ".tim", ".smp", ".snd"}
 DUPLICATE_RE = re.compile(r"_duplicate\d+$", re.IGNORECASE)
 
 

@@ -30,6 +30,13 @@ changes:
 | `AREA/CITY/BIN/city9.drm` | 1,960 | 3,486 | 56 | `(-6400,-12160,-652)` → `(12829,0,9587)` |
 | `AREA/MRLOCK/BIN/mrlock2.drm` | 3,731 | 6,296 | 1 | `(-15181,-23573,-5438)` → `(627,-4654,12801)` |
 
+The viewer now also accepts the remaster's PCM assets. Area PCMs use the same
+scene/terrain structures as DRM files and retain their intro markers; standalone
+object PCMs use the object/model layout and are decoded as independent meshes.
+For example, `AREA/ALUKA/BIN/aluka10.pcm` decodes to 547 vertices, 796 faces,
+and one marker, while `OBJECT/BLADE/BLADE.PCM` decodes to 195 vertices and 366
+faces.
+
 The viewer can therefore inspect remaster levels directly:
 
 ```powershell
@@ -46,10 +53,11 @@ written into the remaster's runtime object tables.
 
 ## What we can mod first
 
-The lowest-risk first target is a loose `.drm` scene asset. The current tools
-can export its geometry and markers, change signed 16-bit marker positions,
-validate the result, and write a new DRM file without touching the Steam
-installation. Texture replacements are another practical target because the
+The lowest-risk first target is a loose `.drm` or area `.pcm` scene asset. The
+current tools can export its geometry and markers, change signed 16-bit marker
+positions, validate the result, and write a new asset without touching the
+Steam installation. Standalone object PCMs are currently read-only in the
+viewer. Texture replacements are another practical target because the
 remaster exposes DDS files in `AREA/TEX` and `AREA/PIX`.
 
 The packed `1/BIGFILE.DAT` is a separate problem. Its header is a flat table of
@@ -64,7 +72,7 @@ loose-file precedence are verified.
    install directly.
 2. Point the viewer and inspector at the staging `AREA` directory.
 3. Export a scene JSON, edit only the desired marker coordinates, and write a
-   new `.drm` with `--patch-scene --output`.
+   new `.drm` or area `.pcm` with `--patch-scene --output`.
 4. Replace the staged loose asset and boot the staged copy to verify that the
    remaster loads it.
 5. Only after that test succeeds should we implement a remaster BIGFILE
