@@ -42,11 +42,11 @@ void func_880000C4()
     ClearImage(&rect, 0, 0, 0);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/cinemax/cinemax", func_88000138);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88000138\nfunc_88000138:\n.include \"asm/nonmatchings/Overlays/cinemax/cinemax/func_88000138.s\"\n.set reorder\n.set at\n");
 
 INCLUDE_RODATA("asm/nonmatchings/Overlays/cinemax/cinemax", D_88000000);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/cinemax/cinemax", func_880001C4);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_880001C4\nfunc_880001C4:\n.include \"asm/nonmatchings/Overlays/cinemax/cinemax/func_880001C4.s\"\n.set reorder\n.set at\n");
 
 void func_880006C0(char *buff1, char *buff2, char *buff3, char *buff4, BufferInfo *bufferInfo)
 {
@@ -86,9 +86,9 @@ void func_88000720(char *buffer, CdlLOC *fp, void (*func)())
     func_88000BB8(fp);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/cinemax/cinemax", func_88000794);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88000794\nfunc_88000794:\n.include \"asm/nonmatchings/Overlays/cinemax/cinemax/func_88000794.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/cinemax/cinemax", func_880007C8);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_880007C8\nfunc_880007C8:\n.include \"asm/nonmatchings/Overlays/cinemax/cinemax/func_880007C8.s\"\n.set reorder\n.set at\n");
 
 int func_88000904(BufferInfo *bufferInfo)
 {
@@ -195,7 +195,7 @@ char *func_880009B4(BufferInfo *buffer_info)
     return buffer;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/cinemax/cinemax", func_88000B04);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88000B04\nfunc_88000B04:\n.include \"asm/nonmatchings/Overlays/cinemax/cinemax/func_88000B04.s\"\n.set reorder\n.set at\n");
 
 void func_88000BB8(CdlLOC *fp)
 {
