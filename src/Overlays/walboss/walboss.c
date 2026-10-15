@@ -90,7 +90,17 @@ __asm__(
     ".set at\n"
 );
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_CreateEgg);
+__asm__(
+    ".section .text\n"
+    ".set noat\n"
+    ".set noreorder\n"
+    ".globl WALBOSS_CreateEgg\n"
+    ".type WALBOSS_CreateEgg, @function\n"
+    "WALBOSS_CreateEgg:\n"
+    ".include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_CreateEgg.s\"\n"
+    ".set reorder\n"
+    ".set at\n"
+);
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_EjectEgg);
 
