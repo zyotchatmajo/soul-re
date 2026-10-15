@@ -1444,9 +1444,9 @@ void Decouple_AngleMoveToward(short *current_ptr, short destination, short step)
     AngleMoveToward(current_ptr, destination, step);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/CAMERA", CriticalDampValue);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl CriticalDampValue\n.type CriticalDampValue, @function\nCriticalDampValue:\n.include \"asm/nonmatchings/Game/CAMERA/CriticalDampValue.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Game/CAMERA", CriticalDampPosition);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl CriticalDampPosition\n.type CriticalDampPosition, @function\nCriticalDampPosition:\n.include \"asm/nonmatchings/Game/CAMERA/CriticalDampPosition.s\"\n.set reorder\n.set at\n");
 
 void CriticalDampAngle(long dampMode, short *currentVal, short target, short *vel, short *accl, int smooth)
 {
@@ -3183,7 +3183,7 @@ void CAMERA_SplineGetNearestPoint2(Camera *camera, Spline *spline, SVector *poin
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/CAMERA", CAMERA_SplineGetNearestPoint);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl CAMERA_SplineGetNearestPoint\n.type CAMERA_SplineGetNearestPoint, @function\nCAMERA_SplineGetNearestPoint:\n.include \"asm/nonmatchings/Game/CAMERA/CAMERA_SplineGetNearestPoint.s\"\n.set reorder\n.set at\n");
 
 void CAMERA_SplineHelpMove(Camera *camera)
 {
@@ -4063,7 +4063,7 @@ void CAMERA_UpdateFocusRotationX(Camera *camera, Instance *focusInstance)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/CAMERA", CAMERA_FollowPlayerTilt);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl CAMERA_FollowPlayerTilt\n.type CAMERA_FollowPlayerTilt, @function\nCAMERA_FollowPlayerTilt:\n.include \"asm/nonmatchings/Game/CAMERA/CAMERA_FollowPlayerTilt.s\"\n.set reorder\n.set at\n");
 
 void CAMERA_FollowGoBehindPlayerWithTimer(Camera *camera)
 {
