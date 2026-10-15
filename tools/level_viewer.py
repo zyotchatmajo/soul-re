@@ -228,6 +228,19 @@ def _safe_target(root: Path, requested: str) -> Path:
     return candidate
 
 
+def _safe_object_asset(root: Path | None, requested: str) -> Path:
+    if root is None:
+        raise FileNotFoundError("object asset root is not configured")
+    candidate = (root / unquote(requested)).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("object asset path escapes the configured object root") from exc
+    if candidate.suffix.lower() != ".pcm" or not candidate.is_file():
+        raise FileNotFoundError(f"object PCM not found: {requested}")
+    return candidate
+
+
 def _sha1(path: Path) -> str:
     digest = hashlib.sha1()
     with path.open("rb") as stream:
@@ -238,6 +251,7 @@ def _sha1(path: Path) -> str:
 
 class ViewerHandler(BaseHTTPRequestHandler):
     root: Path
+    object_root: Path | None = None
     write_root: Path | None = None
     default_asset: str = ""
     html: bytes
@@ -287,6 +301,23 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 if not requested:
                     raise ValueError("missing DRM/PCM path")
                 self._json(HTTPStatus.OK, _geometry(_safe_asset(self.root, requested)))
+                return
+            if parsed.path == "/api/object-list":
+                if self.object_root is None:
+                    self._json(HTTPStatus.OK, [])
+                    return
+                assets = sorted(
+                    path.relative_to(self.object_root).as_posix()
+                    for path in self.object_root.rglob("*")
+                    if path.is_file() and path.suffix.lower() == ".pcm"
+                )
+                self._json(HTTPStatus.OK, assets)
+                return
+            if parsed.path == "/api/object":
+                requested = parse_qs(parsed.query).get("path", [""])[0]
+                if not requested:
+                    raise ValueError("missing object PCM path")
+                self._json(HTTPStatus.OK, _pcm_geometry(_safe_object_asset(self.object_root, requested)))
                 return
             if parsed.path == "/api/write-status":
                 self._json(
@@ -387,6 +418,11 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="explicit root for Apply-to-AREA scene writes; disabled unless supplied",
     )
+    parser.add_argument(
+        "--object-root",
+        type=Path,
+        help="root containing standalone object PCMs (default: sibling OBJECT directory)",
+    )
     args = parser.parse_args(argv)
 
     root = args.root.resolve()
@@ -397,6 +433,9 @@ def main(argv: list[str] | None = None) -> int:
     if write_root and not write_root.is_dir():
         print(f"write root does not exist: {write_root}", file=sys.stderr)
         return 2
+    object_root = args.object_root.resolve() if args.object_root else root.parent / "OBJECT"
+    if not object_root.is_dir():
+        object_root = None
     try:
         initial = _safe_asset(root, args.drm)
     except (FileNotFoundError, ValueError):
@@ -406,6 +445,7 @@ def main(argv: list[str] | None = None) -> int:
     html = html_path.read_bytes()
     handler = type("ConfiguredViewerHandler", (ViewerHandler,), {})
     handler.root = root
+    handler.object_root = object_root
     handler.write_root = write_root
     handler.default_asset = initial.relative_to(root).as_posix() if initial else ""
     handler.html = html
@@ -413,6 +453,7 @@ def main(argv: list[str] | None = None) -> int:
     url = f"http://{args.host}:{server.server_port}/?asset={quote(handler.default_asset)}"
     print(f"Soul Reaver 3D viewer: {url}")
     print(f"Asset root: {root}")
+    print(f"Object root: {object_root if object_root else '<not configured; use --object-root>'}")
     print(f"Write root: {write_root if write_root else '<disabled; use --write-root to enable>'}")
     print("Press Ctrl+C to stop.")
     if args.open:

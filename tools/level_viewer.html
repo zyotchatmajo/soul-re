@@ -63,6 +63,9 @@
     <h2>Placements</h2>
     <label for="objectType">object type</label>
     <select id="objectType"><option value="object">object</option><option value="spawn">spawn point</option><option value="trigger">trigger</option><option value="light">light</option></select>
+    <label for="objectAsset">object PCM</label>
+    <select id="objectAsset"><option value="">placement marker only</option></select>
+    <p class="help">Choose a PCM to preview its mesh. The name below is only a label; leaving this on “placement marker only” draws a cross.</p>
     <label for="objectName">name</label>
     <input id="objectName" value="custom_object" maxlength="48">
     <div class="coord-grid" style="margin-top:8px">
@@ -114,6 +117,7 @@ const wireToggle = document.getElementById("wire");
 const markersToggle = document.getElementById("markersToggle");
 const placementsEl = document.getElementById("placements");
 const objectTypeEl = document.getElementById("objectType");
+const objectAssetEl = document.getElementById("objectAsset");
 const objectNameEl = document.getElementById("objectName");
 const objectXEl = document.getElementById("objectX");
 const objectYEl = document.getElementById("objectY");
@@ -163,7 +167,12 @@ let objectBuffer = null;
 let objectColorBuffer = null;
 let objectLineCount = 0;
 let objectPointCount = 0;
+let objectMeshBuffer = null;
+let objectMeshColorBuffer = null;
+let objectMeshIndexBuffer = null;
+let objectMeshIndexCount = 0;
 let placements = [];
+let objectAssets = new Map();
 let selectedPlacement = -1;
 let placementMode = false;
 let selectedMarker = -1;
@@ -199,26 +208,52 @@ function putAttribute(buffer, location, size) { gl.bindBuffer(gl.ARRAY_BUFFER, b
 function colorForHeight(height, min, max) { const t = Math.max(0, Math.min(1, (height-min)/Math.max(max-min,1))); return [0.13+0.25*t, 0.34+0.45*t, 0.32+0.45*t]; }
 function markerColor(kind) { return kind === "intro" ? [0.95,0.32,0.34] : kind === "plan" ? [0.35,0.65,0.95] : [0.98,0.78,0.25]; }
 function objectColor(kind) { return kind === "spawn" ? [0.35,0.95,0.65] : kind === "trigger" ? [0.95,0.45,0.8] : kind === "light" ? [1.0,0.78,0.25] : [0.45,0.85,1.0]; }
-function clearBuffers() { for (const b of [geometryBuffer,colorBuffer,indexBuffer,markerBuffer,markerColorBuffer,objectBuffer,objectColorBuffer]) if (b) gl.deleteBuffer(b); geometryBuffer=colorBuffer=indexBuffer=markerBuffer=markerColorBuffer=objectBuffer=objectColorBuffer=null; markerCount=0; indexCount=0; objectLineCount=0; objectPointCount=0; }
+function clearBuffers() { for (const b of [geometryBuffer,colorBuffer,indexBuffer,markerBuffer,markerColorBuffer,objectBuffer,objectColorBuffer,objectMeshBuffer,objectMeshColorBuffer,objectMeshIndexBuffer]) if (b) gl.deleteBuffer(b); geometryBuffer=colorBuffer=indexBuffer=markerBuffer=markerColorBuffer=objectBuffer=objectColorBuffer=objectMeshBuffer=objectMeshColorBuffer=objectMeshIndexBuffer=null; markerCount=0; indexCount=0; objectLineCount=0; objectPointCount=0; objectMeshIndexCount=0; }
 function localPosition(x, y, z) { return [(x-model.center[0])/model.scale, (z-model.center[2])/model.scale, (y-model.center[1])/model.scale]; }
 function rawPosition(local) { return [local[0]*model.scale+model.center[0], local[2]*model.scale+model.center[1], local[1]*model.scale+model.center[2]]; }
 function rebuildPlacementBuffers() {
-  if (objectBuffer) gl.deleteBuffer(objectBuffer); if (objectColorBuffer) gl.deleteBuffer(objectColorBuffer);
-  const positions=[], colors=[]; const size=.035;
+  for (const b of [objectBuffer,objectColorBuffer,objectMeshBuffer,objectMeshColorBuffer,objectMeshIndexBuffer]) if (b) gl.deleteBuffer(b);
+  const positions=[], colors=[], meshPositions=[], meshColors=[], meshIndices=[]; const size=.035;
   for (const p of placements) { const q=localPosition(p.x,p.y,p.z), c=objectColor(p.kind); positions.push(q[0]-size,q[1],q[2], q[0]+size,q[1],q[2], q[0],q[1]-size,q[2], q[0],q[1]+size,q[2], q[0],q[1],q[2]-size, q[0],q[1],q[2]+size); for(let i=0;i<6;i++) colors.push(c[0],c[1],c[2]); }
   for (const p of placements) { const q=localPosition(p.x,p.y,p.z), c=objectColor(p.kind); positions.push(q[0],q[1],q[2]); colors.push(c[0],c[1],c[2]); }
+  for (const p of placements) {
+    const object = p.asset ? objectAssets.get(p.asset) : null;
+    if (!object) continue;
+    const base = meshPositions.length / 3, angle = Number(p.rotation || 0) * Math.PI / 180, cs = Math.cos(angle), sn = Math.sin(angle), scale = Number(p.scale || 1);
+    for (const v of object.vertices) {
+      const ox = v[0] * scale, oy = v[1] * scale, oz = v[2] * scale;
+      const x = p.x + ox * cs - oy * sn, y = p.y + ox * sn + oy * cs, z = p.z + oz;
+      const q=localPosition(x,y,z); meshPositions.push(q[0],q[1],q[2]); meshColors.push(.72,.84,.98);
+    }
+    for (const f of object.faces) if (f[0] < object.vertices.length && f[1] < object.vertices.length && f[2] < object.vertices.length) meshIndices.push(base+f[0],base+f[1],base+f[2]);
+  }
   objectLineCount=placements.length*6; objectPointCount=placements.length;
   objectBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,objectBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(positions),gl.DYNAMIC_DRAW);
   objectColorBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,objectColorBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(colors),gl.DYNAMIC_DRAW);
+  objectMeshIndexCount=meshIndices.length;
+  if (meshIndices.some(index => index > 65535)) { objectMeshIndexCount=0; statusEl.textContent="Object mesh is too large for the WebGL1 index buffer."; }
+  if (meshPositions.length) {
+    objectMeshBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,objectMeshBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(meshPositions),gl.DYNAMIC_DRAW);
+    objectMeshColorBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,objectMeshColorBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(meshColors),gl.DYNAMIC_DRAW);
+    objectMeshIndexBuffer=gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,objectMeshIndexBuffer); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(meshIndices),gl.DYNAMIC_DRAW);
+  }
+}
+async function ensureObjectAssets() {
+  const needed=[...new Set(placements.map(p=>p.asset).filter(Boolean))];
+  for (const path of needed) if (!objectAssets.has(path)) {
+    try { objectAssets.set(path,await fetchJson(`/api/object?path=${encodeURIComponent(path)}`)); }
+    catch(e) { statusEl.textContent=`Object load failed: ${e.message}`; }
+  }
+  rebuildPlacementBuffers();
 }
 function renderPlacementList() {
-  placementsEl.innerHTML=placements.length ? placements.map((p,i)=>`<div class="placement ${i===selectedPlacement?"selected":""}" data-index="${i}"><b>${escapeHtml(p.name)}</b> <span style="color:var(--accent)">${escapeHtml(p.kind)}</span><div class="placement-pos">(${p.x}, ${p.y}, ${p.z})</div></div>`).join("") : '<div class="placement">No custom placements.</div>';
+  placementsEl.innerHTML=placements.length ? placements.map((p,i)=>`<div class="placement ${i===selectedPlacement?"selected":""}" data-index="${i}"><b>${escapeHtml(p.name)}</b> <span style="color:var(--accent)">${escapeHtml(p.kind)}</span><div class="placement-pos">(${p.x}, ${p.y}, ${p.z})${p.asset?`<br>${escapeHtml(p.asset)}`:""}</div></div>`).join("") : '<div class="placement">No custom placements.</div>';
   for (const el of placementsEl.querySelectorAll(".placement[data-index]")) el.addEventListener("click",()=>selectPlacement(Number(el.dataset.index)));
 }
-function selectPlacement(index) { selectedPlacement=index; const p=placements[index]; if(p){objectTypeEl.value=p.kind;objectNameEl.value=p.name;objectXEl.value=p.x;objectYEl.value=p.y;objectZEl.value=p.z;} renderPlacementList(); }
-function readPlacementForm() { return {kind:objectTypeEl.value,name:objectNameEl.value.trim()||`custom_object_${placements.length}`,x:Number(objectXEl.value),y:Number(objectYEl.value),z:Number(objectZEl.value),rotation:0,scale:1}; }
-function writePlacementFromForm() { if(selectedPlacement<0||!placements[selectedPlacement]) return; const p=readPlacementForm(); if(![p.x,p.y,p.z].every(Number.isFinite)) return; placements[selectedPlacement]=p; rebuildPlacementBuffers(); renderPlacementList(); }
-function addPlacement(position) { const p=readPlacementForm(); p.x=Math.round(position[0]); p.y=Math.round(position[1]); p.z=Math.round(position[2]); if(!objectNameEl.value.trim()) p.name=`custom_object_${placements.length}`; placements.push(p); selectedPlacement=placements.length-1; objectXEl.value=p.x;objectYEl.value=p.y;objectZEl.value=p.z; rebuildPlacementBuffers(); renderPlacementList(); }
+function selectPlacement(index) { selectedPlacement=index; const p=placements[index]; if(p){objectTypeEl.value=p.kind;objectAssetEl.value=p.asset||"";objectNameEl.value=p.name;objectXEl.value=p.x;objectYEl.value=p.y;objectZEl.value=p.z;} renderPlacementList(); }
+function readPlacementForm() { return {kind:objectTypeEl.value,asset:objectAssetEl.value,name:objectNameEl.value.trim()||`custom_object_${placements.length}`,x:Number(objectXEl.value),y:Number(objectYEl.value),z:Number(objectZEl.value),rotation:0,scale:1}; }
+function writePlacementFromForm() { if(selectedPlacement<0||!placements[selectedPlacement]) return; const p=readPlacementForm(); if(![p.x,p.y,p.z].every(Number.isFinite)) return; placements[selectedPlacement]=p; rebuildPlacementBuffers(); renderPlacementList(); void ensureObjectAssets(); }
+function addPlacement(position) { const p=readPlacementForm(); p.x=Math.round(position[0]); p.y=Math.round(position[1]); p.z=Math.round(position[2]); if(!objectNameEl.value.trim()) p.name=`custom_object_${placements.length}`; placements.push(p); selectedPlacement=placements.length-1; objectXEl.value=p.x;objectYEl.value=p.y;objectZEl.value=p.z; rebuildPlacementBuffers(); renderPlacementList(); void ensureObjectAssets(); }
 function rebuildMarkerBuffers() {
   if(markerBuffer) gl.deleteBuffer(markerBuffer); if(markerColorBuffer) gl.deleteBuffer(markerColorBuffer);
   const positions=[], colors=[];
@@ -274,12 +309,13 @@ function render() {
   if (wireToggle.checked) { gl.disable(gl.DEPTH_TEST); gl.lineWidth(1); gl.drawElements(gl.LINE_STRIP,indexCount,gl.UNSIGNED_SHORT,0); gl.enable(gl.DEPTH_TEST); }
   if (markersToggle.checked && markerCount) { gl.disable(gl.DEPTH_TEST); putAttribute(markerBuffer,positionLoc,3); putAttribute(markerColorBuffer,colorLoc,3); gl.drawArrays(gl.POINTS,0,markerCount); gl.enable(gl.DEPTH_TEST); }
   if (objectLineCount) { gl.disable(gl.DEPTH_TEST); putAttribute(objectBuffer,positionLoc,3); putAttribute(objectColorBuffer,colorLoc,3); gl.drawArrays(gl.LINES,0,objectLineCount); gl.drawArrays(gl.POINTS,objectLineCount,objectPointCount); gl.enable(gl.DEPTH_TEST); }
+  if (objectMeshIndexCount) { putAttribute(objectMeshBuffer,positionLoc,3); putAttribute(objectMeshColorBuffer,colorLoc,3); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,objectMeshIndexBuffer); gl.drawElements(gl.TRIANGLES,objectMeshIndexCount,gl.UNSIGNED_SHORT,0); }
   requestAnimationFrame(render);
 }
 async function fetchJson(url) { const r=await fetch(url); if (!r.ok) throw new Error(await r.text()); return await r.json(); }
 async function loadPath(path) { statusEl.textContent="Loading…"; try { loadModel(await fetchJson(`/api/asset?path=${encodeURIComponent(path)}`)); history.replaceState(null,"",`?asset=${encodeURIComponent(path)}`); } catch(e) { statusEl.textContent="Error"; markersEl.innerHTML=`<div class="marker">${escapeHtml(e.message)}</div>`; } }
 async function refreshWriteStatus() { try { const info=await fetchJson("/api/write-status"); directWritesEnabled=!!info.enabled; updateAssetControls(); writeStatusEl.textContent=directWritesEnabled?`Direct writes enabled: ${info.root}`:"Direct writes disabled. Restart with --write-root to enable."; } catch(e) { directWritesEnabled=false; updateAssetControls(); writeStatusEl.textContent="Direct write status unavailable."; } }
-async function init() { try { await refreshWriteStatus(); const list=await fetchJson("/api/list"); assetSelect.innerHTML=list.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); const params=new URLSearchParams(location.search); const wanted=params.get("asset")||params.get("drm"); const initial=wanted && list.includes(wanted) ? wanted : (list.includes("city/bin/city2.drm") ? "city/bin/city2.drm" : list[0]); if(initial){ assetSelect.value=initial; await loadPath(initial); } } catch(e) { statusEl.textContent="Error"; markersEl.innerHTML=`<div class="marker">${escapeHtml(e.message)}</div>`; } }
+async function init() { try { await refreshWriteStatus(); const objectList=await fetchJson("/api/object-list"); objectAssetEl.innerHTML=`<option value="">placement marker only</option>`+objectList.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); const list=await fetchJson("/api/list"); assetSelect.innerHTML=list.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); const params=new URLSearchParams(location.search); const wanted=params.get("asset")||params.get("drm"); const initial=wanted && list.includes(wanted) ? wanted : (list.includes("city/bin/city2.drm") ? "city/bin/city2.drm" : list[0]); if(initial){ assetSelect.value=initial; await loadPath(initial); } } catch(e) { statusEl.textContent="Error"; markersEl.innerHTML=`<div class="marker">${escapeHtml(e.message)}</div>`; } }
 function normalize(v) { const l=Math.hypot(v[0],v[1],v[2])||1; return [v[0]/l,v[1]/l,v[2]/l]; }
 function cross(a,b) { return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]; }
 function dot(a,b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
@@ -300,13 +336,14 @@ document.getElementById("reset").addEventListener("click",()=>{ if(model){view.p
 document.getElementById("placeCenter").addEventListener("click",()=>{if(!model)return;const s=model.summary,min=s.bounds_min,max=s.bounds_max;addPlacement([(min[0]+max[0])/2,(min[1]+max[1])/2,(min[2]+max[2])/2]);});
 placeModeEl.addEventListener("click",()=>{placementMode=!placementMode;placeModeEl.textContent=placementMode?"Cancel placement":"Click to place";canvas.style.cursor=placementMode?"crosshair":"grab";});
 document.getElementById("deletePlacement").addEventListener("click",()=>{if(selectedPlacement<0)return;placements.splice(selectedPlacement,1);selectedPlacement=Math.min(selectedPlacement,placements.length-1);if(selectedPlacement>=0)selectPlacement(selectedPlacement);else{rebuildPlacementBuffers();renderPlacementList();}});
-[objectTypeEl,objectNameEl,objectXEl,objectYEl,objectZEl].forEach(el=>el.addEventListener("input",writePlacementFromForm));
+[objectTypeEl,objectAssetEl,objectNameEl,objectXEl,objectYEl,objectZEl].forEach(el=>el.addEventListener("input",writePlacementFromForm));
+objectAssetEl.addEventListener("change",writePlacementFromForm);
 [markerXEl,markerYEl,markerZEl].forEach(el=>el.addEventListener("input",writeMarkerFromForm));
 exportSceneEl.addEventListener("click",()=>{if(!model)return;const blob=new Blob([JSON.stringify({format:"soul-re-scene-v1",source:model.path,summary:model.summary,markers:model.markers},null,2)+"\n"],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${(model.summary.world_name||model.asset_type||"asset")}-scene.json`;a.click();URL.revokeObjectURL(a.href);});
 applyMarkersEl.addEventListener("click",async()=>{if(!directWritesEnabled||!model)return;if(!window.confirm(`Write marker changes directly to ${assetSelect.value}? A timestamped backup will be created first.`))return;applyMarkersEl.disabled=true;writeStatusEl.textContent="Writing backup and patched DRM…";try{const response=await fetch("/api/apply-markers",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:assetSelect.value,markers:model.markers})});const result=await response.json();if(!response.ok)throw new Error(result.error||"direct write failed");writeStatusEl.textContent=result.written?`Applied. Backup: ${result.backup}`:"No changes to write.";await loadPath(assetSelect.value);}catch(e){writeStatusEl.textContent=`Write failed: ${e.message}`;}finally{applyMarkersEl.disabled=!directWritesEnabled;}});
 document.getElementById("exportPlacements").addEventListener("click",()=>{if(!model)return;const blob=new Blob([JSON.stringify({format:"soul-re-placement-v1",source:model.path,placements},null,2)+"\n"],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${(model.summary.world_name||"level")}-placements.json`;a.click();URL.revokeObjectURL(a.href);});
 document.getElementById("importPlacements").addEventListener("click",()=>placementFileEl.click());
-placementFileEl.addEventListener("change",async()=>{const file=placementFileEl.files[0];if(!file)return;try{const data=JSON.parse(await file.text());if(data.format!=="soul-re-placement-v1"||!Array.isArray(data.placements))throw new Error("Not a soul-re-placement-v1 file");placements=data.placements.filter(p=>p&&[p.x,p.y,p.z].every(Number.isFinite)).map((p,i)=>({kind:["object","spawn","trigger","light"].includes(p.kind)?p.kind:"object",name:String(p.name||`custom_object_${i}`),x:Number(p.x),y:Number(p.y),z:Number(p.z),rotation:Number(p.rotation||0),scale:Number(p.scale||1)}));selectedPlacement=placements.length-1;if(selectedPlacement>=0)selectPlacement(selectedPlacement);else{rebuildPlacementBuffers();renderPlacementList();}}catch(e){statusEl.textContent="Placement import error";}});
+placementFileEl.addEventListener("change",async()=>{const file=placementFileEl.files[0];if(!file)return;try{const data=JSON.parse(await file.text());if(data.format!=="soul-re-placement-v1"||!Array.isArray(data.placements))throw new Error("Not a soul-re-placement-v1 file");placements=data.placements.filter(p=>p&&[p.x,p.y,p.z].every(Number.isFinite)).map((p,i)=>({kind:["object","spawn","trigger","light"].includes(p.kind)?p.kind:"object",asset:String(p.asset||""),name:String(p.name||`custom_object_${i}`),x:Number(p.x),y:Number(p.y),z:Number(p.z),rotation:Number(p.rotation||0),scale:Number(p.scale||1)}));selectedPlacement=placements.length-1;if(selectedPlacement>=0)selectPlacement(selectedPlacement);else{rebuildPlacementBuffers();renderPlacementList();}await ensureObjectAssets();}catch(e){statusEl.textContent="Placement import error";}});
 canvas.addEventListener("click",e=>{if(!placementMode||dragMoved)return;const hit=terrainHit(e.clientX,e.clientY);if(hit){addPlacement(hit);placementMode=false;placeModeEl.textContent="Click to place";canvas.style.cursor="grab";}});
 canvas.addEventListener("pointerdown",e=>{dragMoved=false;drag={x:e.clientX,y:e.clientY,pan:e.shiftKey||e.button===1};canvas.classList.add("dragging");canvas.setPointerCapture(e.pointerId);});
 canvas.addEventListener("pointerup",e=>{drag=null;canvas.classList.remove("dragging");canvas.releasePointerCapture(e.pointerId);});
