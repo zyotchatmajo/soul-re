@@ -305,7 +305,44 @@ int WALLCR_ShouldJumpOn(Instance *instance)
     return 0;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_ShouldSurpriseAttack);
+int WALLCR_ShouldSurpriseAttack(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+    WallcrVars *vars = (WallcrVars *)mv->extraVars;
+    MonsterIR *enemy = mv->enemy;
+    WallcrAttributes *attributes = (WallcrAttributes *)((MonsterAttributes *)instance->data)->tunData;
+    int time;
+    int count;
+    int chance;
+
+    time = vars->left_over_time + gameTrackerX.timeMult;
+    count = time / 4096;
+    vars->left_over_time = time - (count * 4096);
+    chance = 32767 / (abs(attributes->surprise_attack_time) + 1);
+
+    while (count > 0)
+    {
+        if (rand() < chance)
+        {
+            if (enemy != NULL)
+            {
+                if (PLANAPI_FindClosestNodePositionInUnit(STREAM_GetStreamUnitWithID(instance->currentStreamUnitID),
+                                                          &enemy->instance->position, &mv->destination, 0, 32767, 20, 0))
+                {
+                    return 1;
+                }
+                break;
+            }
+            count--;
+        }
+        else
+        {
+            count--;
+        }
+    }
+
+    return 0;
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_MoveToDestination);
 
