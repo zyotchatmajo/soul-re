@@ -415,7 +415,7 @@ void DRAW_RingPoint(PrimPool *primPool, unsigned long **ot, long color, SVector 
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/DRAW", DRAW_DrawRingPoints);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl DRAW_DrawRingPoints\n.type DRAW_DrawRingPoints, @function\nDRAW_DrawRingPoints:\n.include \"asm/nonmatchings/Game/DRAW/DRAW_DrawRingPoints.s\"\n.set reorder\n.set at\n");
 
 void DRAW_GlowQuad(PrimPool *primPool, unsigned long **ot, long otz, long color, Vector *v0, Vector *v1, Vector *v2, Vector *v3)
 {
@@ -675,9 +675,9 @@ unsigned long *DRAW_DrawGlowPoint(Instance *instance, long seg1, PrimPool *primP
     return primPool->nextPrim;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/DRAW", DRAW_DisplayTFace_zclipped_C);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl DRAW_DisplayTFace_zclipped_C\n.type DRAW_DisplayTFace_zclipped_C, @function\nDRAW_DisplayTFace_zclipped_C:\n.include \"asm/nonmatchings/Game/DRAW/DRAW_DisplayTFace_zclipped_C.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Game/DRAW", DRAW_Zclip_subdiv);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl DRAW_Zclip_subdiv\n.type DRAW_Zclip_subdiv, @function\nDRAW_Zclip_subdiv:\n.include \"asm/nonmatchings/Game/DRAW/DRAW_Zclip_subdiv.s\"\n.set reorder\n.set at\n");
 
 void DRAW_LoadingMessage()
 {
