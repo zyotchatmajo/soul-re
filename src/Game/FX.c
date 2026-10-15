@@ -460,11 +460,11 @@ void _FX_SetupLighting(struct _Instance *instance)
     SetLightMatrix(&lm);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/FX", _FX_DoLighting);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl _FX_DoLighting\n_FX_DoLighting:\n.include \"asm/nonmatchings/Game/FX/_FX_DoLighting.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Game/FX", _FX_BuildSegmentedSplinters);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl _FX_BuildSegmentedSplinters\n_FX_BuildSegmentedSplinters:\n.include \"asm/nonmatchings/Game/FX/_FX_BuildSegmentedSplinters.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Game/FX", _FX_BuildNonSegmentedSplinters);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl _FX_BuildNonSegmentedSplinters\n_FX_BuildNonSegmentedSplinters:\n.include \"asm/nonmatchings/Game/FX/_FX_BuildNonSegmentedSplinters.s\"\n.set reorder\n.set at\n");
 
 void _FX_BuildSplinters(struct _Instance *instance, struct SVECTOR *center, struct SVECTOR *vel, struct SVECTOR *accl, struct FXSplinter *splintDef, struct _FXTracker *fxTracker, void (*fxSetup)(), void (*fxProcess)(), short shardFlags)
 {
@@ -2005,7 +2005,7 @@ void FX_MakeMannaIcon(int x, int y, int xsize, int ysize)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/FX", FX_MakeGlyphIcon);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl FX_MakeGlyphIcon\nFX_MakeGlyphIcon:\n.include \"asm/nonmatchings/Game/FX/FX_MakeGlyphIcon.s\"\n.set reorder\n.set at\n");
 
 void FX_SoulDustProcess(struct _FX_PRIM *fxPrim, struct _FXTracker *fxTracker)
 {
@@ -2466,7 +2466,7 @@ void FX_SubDividePrim(FX_PRIM *fxPrim1, FX_PRIM *fxPrim2)
 
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/FX", FX_ContinueRibbon);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl FX_ContinueRibbon\nFX_ContinueRibbon:\n.include \"asm/nonmatchings/Game/FX/FX_ContinueRibbon.s\"\n.set reorder\n.set at\n");
 
 void FX_StandardFXPrimProcess(FX_PRIM *fxPrim, FXTracker *fxTracker)
 {
@@ -3305,7 +3305,7 @@ void FX_MakeSpark(Instance *instance, Model *model, int segment)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/FX", FX_ContinueParticle);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl FX_ContinueParticle\nFX_ContinueParticle:\n.include \"asm/nonmatchings/Game/FX/FX_ContinueParticle.s\"\n.set reorder\n.set at\n");
 
 void FX_UpdraftPrimModify(FX_PRIM *fxPrim, Instance *instance, FXParticle *particle, FXTracker *fxTracker)
 {
@@ -3383,7 +3383,7 @@ void FX_SetReaverInstance(Instance *instance)
     FX_reaver_instance = instance;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/FX", FX_SoulReaverBlade);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl FX_SoulReaverBlade\nFX_SoulReaverBlade:\n.include \"asm/nonmatchings/Game/FX/FX_SoulReaverBlade.s\"\n.set reorder\n.set at\n");
 
 void FX_ReaverBladeInit()
 {
@@ -3537,7 +3537,7 @@ void FX_DoInstancePowerRing(Instance *instance, long atuTime, long *color, long 
 
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/FX", FX_UpdatePowerRing);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl FX_UpdatePowerRing\nFX_UpdatePowerRing:\n.include \"asm/nonmatchings/Game/FX/FX_UpdatePowerRing.s\"\n.set reorder\n.set at\n");
 
 void FX_UpdateInstanceSplitRing(FXHalvePlane *ring, FXTracker *fxTracker)
 {
@@ -5250,7 +5250,7 @@ void FX_CalcSpiral(int degchange)
 
 // Matches 100% on decomp.me but differs on this project
 #ifndef NON_MATCHING
-INCLUDE_ASM("asm/nonmatchings/Game/FX", FX_Spiral);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl FX_Spiral\nFX_Spiral:\n.include \"asm/nonmatchings/Game/FX/FX_Spiral.s\"\n.set reorder\n.set at\n");
 #else
 void FX_Spiral(PrimPool *primPool, unsigned long **ot)
 {
@@ -5664,7 +5664,7 @@ long fx_get_startz(SVector *position)
     return tmpmat.t[2] / 4;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/FX", FX_DrawRing);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl FX_DrawRing\nFX_DrawRing:\n.include \"asm/nonmatchings/Game/FX/FX_DrawRing.s\"\n.set reorder\n.set at\n");
 
 void fx_setTex(DVECTOR *x, unsigned char *uv, int tx, int offset)
 {
@@ -5682,7 +5682,7 @@ void fx_setTex(DVECTOR *x, unsigned char *uv, int tx, int offset)
     x->vy += offset;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/FX", FX_DrawRing2);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl FX_DrawRing2\nFX_DrawRing2:\n.include \"asm/nonmatchings/Game/FX/FX_DrawRing2.s\"\n.set reorder\n.set at\n");
 
 void FX_DrawFField(MATRIX *wcTransform, FXForceFieldEffect *field)
 {
@@ -5913,9 +5913,9 @@ void FX_Draw_Glowing_Line(unsigned long **ot, long otz, DVECTOR *sxy0, DVECTOR *
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/FX", FX_Lightning);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl FX_Lightning\nFX_Lightning:\n.include \"asm/nonmatchings/Game/FX/FX_Lightning.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Game/FX", FX_LightHouse);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl FX_LightHouse\nFX_LightHouse:\n.include \"asm/nonmatchings/Game/FX/FX_LightHouse.s\"\n.set reorder\n.set at\n");
 
 void FX_StartPassthruFX(Instance *instance, SVector *normal, SVector *point)
 {
