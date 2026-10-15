@@ -37,11 +37,18 @@ For example, `AREA/ALUKA/BIN/aluka10.pcm` decodes to 547 vertices, 796 faces,
 and one marker, while `OBJECT/BLADE/BLADE.PCM` decodes to 195 vertices and 366
 faces.
 
+The remaster's larger character and enemy models are stored as SRM files rather
+than PCMs. The viewer now decodes the SR1 SRM mesh layout as well: the installed
+`1/OBJECT` tree contains 349 SRMs and 29 object PCMs, for 378 selectable object
+meshes in total. SRA files are runtime object metadata and SRL files are stream/
+animation resources; neither is itself a standalone renderable mesh.
+
 The viewer can therefore inspect remaster levels directly:
 
 ```powershell
 python tools/level_viewer.py `
   --root 'F:\SteamLibrary\steamapps\common\Soul Reaver I-II\1\AREA' `
+  --object-root 'F:\SteamLibrary\steamapps\common\Soul Reaver I-II\1\OBJECT' `
   --drm CITY/BIN/city9.drm `
   --open
 ```
@@ -56,9 +63,10 @@ written into the remaster's runtime object tables.
 The lowest-risk first target is a loose `.drm` or area `.pcm` scene asset. The
 current tools can export its geometry and markers, change signed 16-bit marker
 positions, validate the result, and write a new asset without touching the
-Steam installation. Standalone object PCMs are currently read-only in the
-viewer. Texture replacements are another practical target because the
-remaster exposes DDS files in `AREA/TEX` and `AREA/PIX`.
+Steam installation. Object PCMs and SRMs are currently read-only previews in
+the viewer; placements still export as sidecar JSON. Texture replacements are
+another practical target because the remaster exposes DDS files in `AREA/TEX`
+and `AREA/PIX`.
 
 The packed `1/BIGFILE.DAT` is a separate problem. Its header is a flat table of
 1,325 entries and its folder/encryption layout is different from the PS1

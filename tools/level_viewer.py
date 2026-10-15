@@ -7,6 +7,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import shutil
 import struct
@@ -203,6 +204,127 @@ def _pcm_geometry(path: Path) -> dict[str, object]:
     }
 
 
+def _srm_geometry(path: Path) -> dict[str, object]:
+    """Decode the SR1 remaster's standalone SRM model container.
+
+    Soul Reaver I's SRM files contain one mesh chunk followed by interleaved
+    float positions, packed normals/weights, and 16-bit triangle indices. The
+    companion SRA files are runtime object metadata; they do not contain the
+    mesh itself, so the viewer exposes SRM files as the selectable geometry.
+    """
+    data = path.read_bytes()
+    if len(data) < 8 or data[:4] != b"SRM\x01":
+        raise ValueError("SRM has an unsupported magic/version")
+    offset = 4
+
+    def read_u32(label: str) -> int:
+        nonlocal offset
+        if offset + 4 > len(data):
+            raise ValueError(f"SRM {label} field is outside the file")
+        value = struct.unpack_from("<I", data, offset)[0]
+        offset += 4
+        return value
+
+    def skip(size: int, label: str) -> None:
+        nonlocal offset
+        if size < 0 or offset + size > len(data):
+            raise ValueError(f"SRM {label} section is outside the file")
+        offset += size
+
+    shader_count = read_u32("shader count")
+    if not 1 <= shader_count <= 8:
+        raise ValueError(f"SRM shader count is unreasonable: {shader_count}")
+    for _ in range(shader_count):
+        read_u32("shader type")
+        skip(16, "shader parameters")
+        skip(24, "shader stream ranges")
+
+    texture_count = read_u32("texture count")
+    if texture_count > 512:
+        raise ValueError(f"SRM texture count is unreasonable: {texture_count}")
+    texture_names: list[str] = []
+    for _ in range(texture_count):
+        skip_start = offset
+        skip(31, "texture name")
+        texture_names.append(
+            data[skip_start : skip_start + 31].split(b"\0", 1)[0].decode("ascii", "replace")
+        )
+        skip(1, "texture flag")
+
+    extra_bone_count = read_u32("extra bone count")
+    if extra_bone_count > 128:
+        raise ValueError(f"SRM extra bone count is unreasonable: {extra_bone_count}")
+    skip((32 + extra_bone_count) * 48, "bone matrices")
+    if offset + 4 > len(data):
+        raise ValueError("SRM bone transform check is outside the file")
+    if struct.unpack_from("<I", data, offset)[0] != 0x80000000:
+        # The optional transform marker is absent in some models.
+        pass
+    else:
+        offset += 4
+    skip(128, "bone flags")
+
+    vertex_count = read_u32("vertex count")
+    face_count = read_u32("face count")
+    if (
+        vertex_count == 0
+        or vertex_count > 200_000
+        or face_count == 0
+        or face_count > 600_000
+        or face_count % 3
+    ):
+        raise ValueError(f"SRM geometry counts are unreasonable: {vertex_count}/{face_count}")
+    if offset + vertex_count * 32 + (face_count // 3) * 6 > len(data):
+        raise ValueError("SRM geometry extends beyond the file")
+
+    vertices: list[tuple[float, float, float]] = []
+    bounds_min = [float("inf"), float("inf"), float("inf")]
+    bounds_max = [float("-inf"), float("-inf"), float("-inf")]
+    for _ in range(vertex_count):
+        x, y, z = struct.unpack_from("<3f", data, offset)
+        offset += 32
+        if not all(math.isfinite(value) for value in (x, y, z)):
+            raise ValueError("SRM contains a non-finite vertex")
+        vertices.append((x, y, z))
+        bounds_min[0] = min(bounds_min[0], x)
+        bounds_min[1] = min(bounds_min[1], y)
+        bounds_min[2] = min(bounds_min[2], z)
+        bounds_max[0] = max(bounds_max[0], x)
+        bounds_max[1] = max(bounds_max[1], y)
+        bounds_max[2] = max(bounds_max[2], z)
+
+    faces: list[tuple[int, int, int]] = []
+    for _ in range(face_count // 3):
+        v0, v1, v2 = struct.unpack_from("<3H", data, offset)
+        offset += 6
+        if max(v0, v1, v2) >= vertex_count:
+            raise ValueError("SRM face index is outside its vertex array")
+        faces.append((v2, v1, v0))
+
+    summary = {
+        "path": str(path),
+        "file_size": len(data),
+        "world_name": path.stem,
+        "shader_count": shader_count,
+        "texture_count": texture_count,
+        "textures": texture_names,
+        "extra_bone_count": extra_bone_count,
+        "vertex_count": vertex_count,
+        "face_count": face_count // 3,
+        "bounds_min": tuple(bounds_min),
+        "bounds_max": tuple(bounds_max),
+    }
+    return {
+        "format": "soul-re-view-v1",
+        "asset_type": "srm",
+        "path": path.as_posix(),
+        "summary": summary,
+        "vertices": vertices,
+        "faces": faces,
+        "markers": [],
+    }
+
+
 def _safe_asset(root: Path, requested: str) -> Path:
     candidate = (root / unquote(requested)).resolve()
     try:
@@ -236,8 +358,8 @@ def _safe_object_asset(root: Path | None, requested: str) -> Path:
         candidate.relative_to(root)
     except ValueError as exc:
         raise ValueError("object asset path escapes the configured object root") from exc
-    if candidate.suffix.lower() != ".pcm" or not candidate.is_file():
-        raise FileNotFoundError(f"object PCM not found: {requested}")
+    if candidate.suffix.lower() not in {".pcm", ".srm"} or not candidate.is_file():
+        raise FileNotFoundError(f"object PCM/SRM not found: {requested}")
     return candidate
 
 
@@ -309,15 +431,17 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 assets = sorted(
                     path.relative_to(self.object_root).as_posix()
                     for path in self.object_root.rglob("*")
-                    if path.is_file() and path.suffix.lower() == ".pcm"
+                    if path.is_file() and path.suffix.lower() in {".pcm", ".srm"}
                 )
                 self._json(HTTPStatus.OK, assets)
                 return
             if parsed.path == "/api/object":
                 requested = parse_qs(parsed.query).get("path", [""])[0]
                 if not requested:
-                    raise ValueError("missing object PCM path")
-                self._json(HTTPStatus.OK, _pcm_geometry(_safe_object_asset(self.object_root, requested)))
+                    raise ValueError("missing object PCM/SRM path")
+                source = _safe_object_asset(self.object_root, requested)
+                geometry = _pcm_geometry(source) if source.suffix.lower() == ".pcm" else _srm_geometry(source)
+                self._json(HTTPStatus.OK, geometry)
                 return
             if parsed.path == "/api/write-status":
                 self._json(

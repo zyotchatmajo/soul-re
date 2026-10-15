@@ -94,8 +94,9 @@ python tools/level_viewer.py --open
 If the browser does not open automatically, visit the URL printed by the
 command. Drag the canvas to orbit, hold Shift while dragging to pan, and use
 the mouse wheel to zoom. The asset selector lists every extracted `.drm` and
-`.pcm`. Area PCMs are decoded as scene terrain with markers; object PCMs are
-decoded as standalone model meshes. The `wireframe overlay` and `scene
+`.pcm`. Area PCMs are decoded as scene terrain with markers; object PCMs and
+standalone SRMs from the sibling `OBJECT` directory are decoded as model
+meshes for placement previews. The `wireframe overlay` and `scene
 markers` checkboxes are display-only; source files are never changed.
 
 The server accepts an alternate extraction root or initial asset when needed
