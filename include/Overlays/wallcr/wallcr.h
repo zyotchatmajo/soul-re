@@ -40,5 +40,7 @@ int WALLCR_ShouldSurpriseAttack(Instance *instance);
 int WALLCR_MoveToDestination(Instance *instance, Position *target);
 int WALLCR_AngleFromPosToPos(Position *oldPos, Position *newPos, Rotation *rotation);
 int WALLCR_FollowWall(Instance *instance);
+int WALLCR_NearFloor(Instance *instance);
+void *WALLCR_CollideFace(Level *level, Position *start, Position *end, Position *hit, Position *normal);
 
 #endif

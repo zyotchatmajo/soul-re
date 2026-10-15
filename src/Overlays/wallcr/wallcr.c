@@ -9,6 +9,7 @@
 #include "Game/GAMELOOP.h"
 #include "Game/STREAM.h"
 #include "Game/PLAN/PLANAPI.h"
+#include "Game/COLLIDE.h"
 #include "Game/G2/ANMCTRLR.h"
 #include "Game/PLAN/ENMYPLAN.h"
 #include "Game/STATE.h"
@@ -58,9 +59,67 @@ void WALLCR_SetFlex(Instance *instance, int flex)
     G2Anim_SetController_Vector(&instance->anim, 18, G2ANIM_CTRLRTYPE_ADD_LOCALROT, &extraRot);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_CollideFace);
+void *WALLCR_CollideFace(Level *level, Position *start, Position *end, Position *hit, Position *normal)
+{
+    PCollideInfo info;
+    Position oldPoint;
+    Position newPoint;
+    void *result;
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_NearFloor);
+    oldPoint.x = start->x;
+    oldPoint.y = start->y;
+    oldPoint.z = start->z;
+    newPoint.x = end->x;
+    newPoint.y = end->y;
+    newPoint.z = end->z;
+    info.oldPoint = (SVECTOR *)&oldPoint;
+    info.newPoint = (SVECTOR *)&newPoint;
+    info.inst = NULL;
+    info.collideType = 1;
+    info.instance = NULL;
+    result = NULL;
+    COLLIDE_PointAndWorld(&info, level);
+
+    if (info.type == 3)
+    {
+        result = info.prim;
+        if (hit != NULL)
+        {
+            hit->x = newPoint.x;
+            hit->y = newPoint.y;
+            hit->z = newPoint.z;
+        }
+        if (normal != NULL)
+        {
+            normal->x = info.wNormal.vx;
+            normal->y = info.wNormal.vy;
+            normal->z = info.wNormal.vz;
+        }
+    }
+
+    return result;
+}
+
+int WALLCR_NearFloor(Instance *instance)
+{
+    Level *level;
+    Position start;
+    Position end;
+
+    level = STREAM_GetLevelWithID(instance->currentStreamUnitID);
+    if (level != NULL)
+    {
+        COPY_SVEC(Position, &start, Position, &instance->position);
+        COPY_SVEC(Position, &end, Position, &start);
+        end.z -= 320;
+        if (WALLCR_CollideFace(level, &start, &end, NULL, NULL) != NULL)
+        {
+            return 1;
+        }
+    }
+
+    return 0;
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_FindJumpOnPoint);
 
@@ -239,7 +298,43 @@ uintptr_t WALLCR_Query(Instance *instance, unsigned long query)
     return ret;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Init);
+void WALLCR_Init(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+    WallcrVars *vars;
+
+    MON_DefaultInit(instance);
+    G2Anim_AttachControllerToSeg(&instance->anim, 1, G2ANIM_CTRLRTYPE_ADD_LOCALTRANS);
+    G2Anim_AttachControllerToSeg(&instance->anim, 0, G2ANIM_CTRLRTYPE_ADD_LOCALROT);
+    G2Anim_AttachControllerToSeg(&instance->anim, 18, G2ANIM_CTRLRTYPE_ADD_LOCALROT);
+    G2Anim_DisableController(&instance->anim, 1, G2ANIM_CTRLRTYPE_ADD_LOCALTRANS);
+    G2Anim_DisableController(&instance->anim, 0, G2ANIM_CTRLRTYPE_ADD_LOCALROT);
+    G2Anim_DisableController(&instance->anim, 18, G2ANIM_CTRLRTYPE_ADD_LOCALROT);
+    mv->auxFlags &= ~0x20;
+
+    mv = (MonsterVars *)instance->extraData;
+    if (mv != NULL)
+    {
+        vars = (WallcrVars *)MEMPACK_Malloc(sizeof(WallcrVars), 28);
+        if (vars == NULL)
+        {
+            mv->extraVars = NULL;
+            return;
+        }
+
+        vars->wallcrFlags = 0;
+        vars->left_over_time = 0;
+        mv->extraVars = vars;
+
+        if (mv->initialBehavior != 16 && !WALLCR_NearFloor(instance) && WALLCR_FollowWall(instance))
+        {
+            WALLCR_EnableControllers(instance);
+            mv->auxFlags |= 4;
+            mv->mvFlags |= 0x800;
+            MON_SwitchState(instance, MONSTER_STATE_IDLE);
+        }
+    }
+}
 
 void WALLCR_CleanUp(Instance *instance)
 {
