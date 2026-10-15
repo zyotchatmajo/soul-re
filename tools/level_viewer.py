@@ -4,9 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import hashlib
 import json
+import os
+import shutil
 import struct
 import sys
+import tempfile
 import threading
 import webbrowser
 from http import HTTPStatus
@@ -14,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from level_editor import _module_offset, _parse_drm, _parse_scene_markers
+from level_editor import _module_offset, _parse_drm, _parse_scene_markers, _patch_scene
 
 
 def _geometry(path: Path) -> dict[str, object]:
@@ -72,8 +77,31 @@ def _safe_asset(root: Path, requested: str) -> Path:
     return candidate
 
 
+def _safe_target(root: Path, requested: str) -> Path:
+    """Resolve a writable DRM target without requiring it to exist yet."""
+    candidate = (root / unquote(requested)).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("write path escapes the configured write root") from exc
+    if candidate.suffix.lower() != ".drm":
+        raise ValueError("direct writes are limited to .drm assets")
+    if not candidate.is_file():
+        raise FileNotFoundError(f"writable DRM target not found: {requested}")
+    return candidate
+
+
+def _sha1(path: Path) -> str:
+    digest = hashlib.sha1()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 class ViewerHandler(BaseHTTPRequestHandler):
     root: Path
+    write_root: Path | None = None
     default_asset: str = ""
     html: bytes
 
@@ -94,6 +122,15 @@ class ViewerHandler(BaseHTTPRequestHandler):
     def _json(self, status: HTTPStatus, value: object) -> None:
         self._send(status, "application/json; charset=utf-8", json.dumps(value).encode("utf-8"))
 
+    def _request_json(self) -> dict[str, object]:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0 or length > 8 * 1024 * 1024:
+            raise ValueError("request body must be between 1 byte and 8 MiB")
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("request JSON must be an object")
+        return payload
+
     def do_GET(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
         parsed = urlparse(self.path)
         try:
@@ -110,12 +147,78 @@ class ViewerHandler(BaseHTTPRequestHandler):
                     raise ValueError("missing DRM path")
                 self._json(HTTPStatus.OK, _geometry(_safe_asset(self.root, requested)))
                 return
+            if parsed.path == "/api/write-status":
+                self._json(
+                    HTTPStatus.OK,
+                    {
+                        "enabled": self.write_root is not None,
+                        "root": str(self.write_root) if self.write_root else None,
+                    },
+                )
+                return
             self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"not found\n")
         except FileNotFoundError as exc:
             self._json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
         except (ValueError, struct.error) as exc:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
         except Exception as exc:  # pragma: no cover - defensive server boundary
+            self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+
+    def do_POST(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
+        parsed = urlparse(self.path)
+        try:
+            if parsed.path != "/api/apply-markers":
+                self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"not found\n")
+                return
+            if self.write_root is None:
+                self._json(HTTPStatus.CONFLICT, {"error": "direct writes are disabled; restart with --write-root"})
+                return
+            payload = self._request_json()
+            requested = payload.get("path")
+            markers = payload.get("markers")
+            if not isinstance(requested, str) or not requested:
+                raise ValueError("path must be a non-empty string")
+            if not isinstance(markers, list):
+                raise ValueError("markers must be an array")
+            source = _safe_asset(self.root, requested)
+            target = _safe_target(self.write_root, requested)
+            before_sha1 = _sha1(target)
+            scene_payload = {"format": "soul-re-scene-v1", "source": requested, "markers": markers}
+            with tempfile.TemporaryDirectory(prefix="soul-re-viewer-") as temp_dir:
+                temp_dir_path = Path(temp_dir)
+                scene_path = temp_dir_path / "scene.json"
+                patched_path = temp_dir_path / target.name
+                scene_path.write_text(json.dumps(scene_payload), encoding="utf-8")
+                changed = _patch_scene(source, scene_path, patched_path)
+                after_sha1 = _sha1(patched_path)
+                if before_sha1 == after_sha1:
+                    self._json(HTTPStatus.OK, {"path": requested, "changed": 0, "written": False, "sha1": before_sha1})
+                    return
+                timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
+                backup = target.with_name(f"{target.name}.bak-{timestamp}")
+                suffix = 1
+                while backup.exists():
+                    backup = target.with_name(f"{target.name}.bak-{timestamp}-{suffix}")
+                    suffix += 1
+                shutil.copy2(target, backup)
+                os.replace(patched_path, target)
+            self._json(
+                HTTPStatus.OK,
+                {
+                    "path": requested,
+                    "changed": changed,
+                    "written": True,
+                    "target": str(target),
+                    "backup": str(backup),
+                    "before_sha1": before_sha1,
+                    "after_sha1": after_sha1,
+                },
+            )
+        except FileNotFoundError as exc:
+            self._json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+        except (ValueError, json.JSONDecodeError, struct.error) as exc:
+            self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+        except Exception as exc:  # pragma: no cover - defensive write boundary
             self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
 
 
@@ -131,11 +234,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", default="127.0.0.1", help="listen address")
     parser.add_argument("--port", type=int, default=8765, help="listen port (0 chooses a free port)")
     parser.add_argument("--open", action="store_true", help="open the viewer in the default browser")
+    parser.add_argument(
+        "--write-root",
+        type=Path,
+        help="explicit root for Apply-to-AREA marker writes; disabled unless supplied",
+    )
     args = parser.parse_args(argv)
 
     root = args.root.resolve()
     if not root.is_dir():
         print(f"asset root does not exist: {root}", file=sys.stderr)
+        return 2
+    write_root = args.write_root.resolve() if args.write_root else None
+    if write_root and not write_root.is_dir():
+        print(f"write root does not exist: {write_root}", file=sys.stderr)
         return 2
     try:
         initial = _safe_asset(root, args.drm)
@@ -146,12 +258,14 @@ def main(argv: list[str] | None = None) -> int:
     html = html_path.read_bytes()
     handler = type("ConfiguredViewerHandler", (ViewerHandler,), {})
     handler.root = root
+    handler.write_root = write_root
     handler.default_asset = initial.relative_to(root).as_posix() if initial else ""
     handler.html = html
     server = ThreadingHTTPServer((args.host, args.port), handler)
     url = f"http://{args.host}:{server.server_port}/?drm={quote(handler.default_asset)}"
     print(f"Soul Reaver 3D viewer: {url}")
     print(f"Asset root: {root}")
+    print(f"Write root: {write_root if write_root else '<disabled; use --write-root to enable>'}")
     print("Press Ctrl+C to stop.")
     if args.open:
         threading.Timer(0.15, lambda: webbrowser.open(url)).start()

@@ -110,6 +110,25 @@ and export a `soul-re-placement-v1` JSON sidecar. These placements are
 currently viewer data; they do not overwrite the DRM or claim to be game
 runtime objects until the DRM object-instance tables are decoded.
 
+## Direct loose-DRM testing
+
+For a copied/staged PC remaster install, pass an explicit write root to enable
+the marker editor's `Apply to AREA` button. The server refuses direct writes
+unless this flag is present, and every changed DRM receives a timestamped
+`.bak-YYYYMMDD-HHMMSS` backup first:
+
+```powershell
+python tools/level_viewer.py `
+  --root 'F:\SteamLibrary\steamapps\common\Soul Reaver I-II\1\AREA' `
+  --write-root 'F:\SteamLibrary\steamapps\common\Soul Reaver I-II\1\AREA' `
+  --drm CITY/BIN/city9.drm `
+  --open
+```
+
+Select a marker, edit its X/Y/Z fields, and click `Apply to AREA`. This writes
+only marker coordinates through the existing safe DRM patcher. Custom object
+placements still export as JSON and are not written into runtime object tables.
+
 The same viewer and DRM tools work against the PC remaster's loose `AREA`
 directory. For example, the installed `city9.drm` was parsed successfully
 with the original relocation layout, geometry arrays, and marker structures:

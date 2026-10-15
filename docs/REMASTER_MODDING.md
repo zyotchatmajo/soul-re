@@ -70,6 +70,11 @@ loose-file precedence are verified.
 5. Only after that test succeeds should we implement a remaster BIGFILE
    extractor/repacker or a distributable mod package.
 
+For convenience, the viewer can perform step 3 directly when started with an
+explicit `--write-root`. It creates a timestamped backup before applying
+marker coordinates; without that flag the `Apply to AREA` control remains
+disabled.
+
 The installed copy currently has a pre-existing DLL backup/modification, so a
 staging copy is especially important for separating our asset tests from
 unrelated executable changes.
