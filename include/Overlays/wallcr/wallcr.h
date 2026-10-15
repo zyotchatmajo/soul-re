@@ -31,6 +31,8 @@ typedef struct _WallcrVars
     short wallcrFlags;
 } WallcrVars;
 
+void WALLCR_EnableControllers(Instance *instance);
 void WALLCR_DisableControllers(Instance *instance);
+void WALLCR_SetFlex(Instance *instance, int flex);
 
 #endif

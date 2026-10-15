@@ -1,18 +1,54 @@
 #include "Overlays/wallcr/wallcr.h"
 #include "Game/MONSTER/MONAPI.h"
 #include "Game/MONSTER/MONSTER.h"
+#include "Game/MONSTER/MONLIB.h"
 #include "Game/PHYSICS.h"
+#include "Game/MEMPACK.h"
+#include "Game/G2/ANMCTRLR.h"
+#include "Game/PLAN/ENMYPLAN.h"
 
 /* double-check that WALLCR_ShouldJumpOff and WALLCR_ShouldJumpOn aren't swapped */
 
 // this conditional is for the objdiff report
 #ifndef SKIP_ASM
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_EnableControllers);
+void WALLCR_EnableControllers(Instance *instance)
+{
+    G2SVector3 extraRot;
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_DisableControllers);
+    if (!G2Anim_IsControllerActive(&instance->anim, 1, G2ANIM_CTRLRTYPE_ADD_LOCALTRANS))
+    {
+        G2Anim_EnableController(&instance->anim, 1, G2ANIM_CTRLRTYPE_ADD_LOCALTRANS);
+        extraRot.y = 0;
+        extraRot.x = 0;
+        extraRot.z = -436;
+        G2Anim_SetController_Vector(&instance->anim, 1, G2ANIM_CTRLRTYPE_ADD_LOCALTRANS, &extraRot);
+        instance->position.z += 436;
+        G2Anim_EnableController(&instance->anim, 0, G2ANIM_CTRLRTYPE_ADD_LOCALROT);
+        G2Anim_EnableController(&instance->anim, 18, G2ANIM_CTRLRTYPE_ADD_LOCALROT);
+    }
+}
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_SetFlex);
+void WALLCR_DisableControllers(Instance *instance)
+{
+    if (G2Anim_IsControllerActive(&instance->anim, 1, G2ANIM_CTRLRTYPE_ADD_LOCALTRANS))
+    {
+        G2Anim_DisableController(&instance->anim, 1, G2ANIM_CTRLRTYPE_ADD_LOCALTRANS);
+        instance->position.z -= 436;
+        G2Anim_DisableController(&instance->anim, 0, G2ANIM_CTRLRTYPE_ADD_LOCALROT);
+        G2Anim_DisableController(&instance->anim, 18, G2ANIM_CTRLRTYPE_ADD_LOCALROT);
+    }
+}
+
+void WALLCR_SetFlex(Instance *instance, int flex)
+{
+    G2SVector3 extraRot;
+
+    extraRot.x = flex;
+    extraRot.z = 0;
+    extraRot.y = 0;
+    G2Anim_SetController_Vector(&instance->anim, 18, G2ANIM_CTRLRTYPE_ADD_LOCALROT, &extraRot);
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_CollideFace);
 
@@ -42,11 +78,47 @@ INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_DetachEntry);
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Detach);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_SeekPath);
+int WALLCR_SeekPath(Instance *instance, Position *outputPos, Position *targetPos, int unused, int validNodeTypes)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+    int result;
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_ShouldJumpOff);
+    (void)unused;
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_ShouldJumpOn);
+    result = ENMYPLAN_MoveToTargetFinal(instance, outputPos, mv->pathSlotID, targetPos, validNodeTypes);
+    if (result == 3)
+    {
+        MON_GetPlanSlot(mv);
+    }
+
+    return result;
+}
+
+int WALLCR_ShouldJumpOff(Instance *instance)
+{
+    int nodeType;
+
+    nodeType = ENMYPLAN_GetNodeTypeOfNextWaypoint(((MonsterVars *)instance->extraData)->pathSlotID);
+    if (nodeType != 64 && ((nodeType >> 3) & 3) == 1)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+int WALLCR_ShouldJumpOn(Instance *instance)
+{
+    int nodeType;
+
+    nodeType = ENMYPLAN_GetNodeTypeOfNextWaypoint(((MonsterVars *)instance->extraData)->pathSlotID);
+    if (nodeType != 64 && ((nodeType >> 3) & 3) == 0)
+    {
+        return 1;
+    }
+
+    return 0;
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_ShouldSurpriseAttack);
 
@@ -82,13 +154,40 @@ uintptr_t WALLCR_Query(Instance *instance, unsigned long query)
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Init);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_CleanUp);
+void WALLCR_CleanUp(Instance *instance)
+{
+    MonsterVars *mv;
+
+    G2Anim_DetachControllerFromSeg(&instance->anim, 1, G2ANIM_CTRLRTYPE_ADD_LOCALTRANS);
+    G2Anim_DetachControllerFromSeg(&instance->anim, 0, G2ANIM_CTRLRTYPE_ADD_LOCALROT);
+    G2Anim_DetachControllerFromSeg(&instance->anim, 18, G2ANIM_CTRLRTYPE_ADD_LOCALROT);
+
+    mv = (MonsterVars *)instance->extraData;
+    if (mv != NULL && mv->extraVars != NULL)
+    {
+        MEMPACK_Free(mv->extraVars);
+    }
+
+    MON_CleanUp(instance);
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_PursueEntry);
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Pursue);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_SurpriseAttackEntry);
+void WALLCR_SurpriseAttackEntry(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+
+    if (mv->auxFlags & 0x20)
+    {
+        MON_GetPlanSlot(mv);
+    }
+    else
+    {
+        MON_SurpriseAttackEntry(instance);
+    }
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_SurpriseAttack);
 
@@ -102,7 +201,19 @@ INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_WanderEntry);
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Wander);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_FallEntry);
+void WALLCR_FallEntry(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+
+    if (mv->auxFlags & 4)
+    {
+        MON_SwitchStateDoEntry(instance, MONSTER_STATE_IDLE);
+    }
+    else
+    {
+        MON_FallEntry(instance);
+    }
+}
 
 void WALLCR_Fall(Instance *instance)
 {
