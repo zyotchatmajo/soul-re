@@ -78,7 +78,17 @@ __asm__(
     ".set at\n"
 );
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_FindEgg);
+__asm__(
+    ".section .text\n"
+    ".set noat\n"
+    ".set noreorder\n"
+    ".globl WALBOSS_FindEgg\n"
+    ".type WALBOSS_FindEgg, @function\n"
+    "WALBOSS_FindEgg:\n"
+    ".include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_FindEgg.s\"\n"
+    ".set reorder\n"
+    ".set at\n"
+);
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_CreateEgg);
 
