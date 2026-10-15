@@ -1,9 +1,43 @@
 #include "Overlays/walboss/walboss.h"
+#include "Game/G2/ANMCTRLR.h"
 
 // this conditional is for the objdiff report
 #ifndef SKIP_ASM
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_SetSegmentYaw);
+void WALBOSS_SetSegmentYaw(Instance *instance, int yaw)
+{
+    MonsterVars *mv;
+    MonsterAttributes *ma;
+    WalbossVars *vars;
+    WalbossAttributes *attrs;
+    G2SVector3 rotation;
+    register int value asm("v1");
+    int result;
+
+    mv = (MonsterVars *)instance->extraData;
+    ma = (MonsterAttributes *)instance->data;
+    vars = (WalbossVars *)mv->extraVars;
+    attrs = (WalbossAttributes *)ma->tunData;
+    if (vars != NULL && attrs != NULL)
+    {
+        yaw &= 0xFFF;
+        vars->segmentYaw = yaw;
+        rotation.y = 0;
+        rotation.x = 0;
+        if (yaw < 0x801)
+        {
+            value = yaw * 5;
+        }
+        else
+        {
+            value = (yaw - 0x1000) * 5;
+        }
+        result = value * 15;
+        __asm__ volatile ("sll %0, %1, 3\n\tsra %0, %0, 10" : "=r"(rotation.z) : "r"(result));
+        rotation.z &= 0xFFF;
+        G2Anim_SetController_Vector(&instance->anim, *(short *)((char *)attrs + 8), G2ANIM_CTRLRTYPE_ADD_LOCALROT, &rotation);
+    }
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_InterpSegmentYaw);
 
