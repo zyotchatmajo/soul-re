@@ -1,6 +1,8 @@
 #include "Overlays/walboss/walboss.h"
 #include "Game/G2/ANMCTRLR.h"
 #include "Game/MATH3D.h"
+#include "Game/GAMELOOP.h"
+#include "Game/INSTANCE.h"
 
 // this conditional is for the objdiff report
 #ifndef SKIP_ASM
@@ -54,7 +56,15 @@ INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_ChooseAttack);
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_ShouldIAttack);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_MessageToLegs);
+void WALBOSS_MessageToLegs(int message)
+{
+    Instance *inst;
+    for (inst = gameTrackerX.instanceList->first; inst != NULL; inst = inst->next)
+    {
+        if (INSTANCE_Query(inst, 1) == 0x410002)
+            INSTANCE_Post(inst, 0x01000017, message);
+    }
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_LivingLegs);
 
