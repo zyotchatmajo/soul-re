@@ -84,17 +84,17 @@ __asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88000700\nfunc_8
 
 __asm__(".section .text\n.set noat\n.set noreorder\n.globl func_8800076C\nfunc_8800076C:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_8800076C.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_88000790);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88000790\nfunc_88000790:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_88000790.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_880007A0);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_880007A0\nfunc_880007A0:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_880007A0.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_880007E0);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_880007E0\nfunc_880007E0:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_880007E0.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_88000820);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88000820\nfunc_88000820:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_88000820.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_88000890);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88000890\nfunc_88000890:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_88000890.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_88000900);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88000900\nfunc_88000900:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_88000900.s\"\n.set reorder\n.set at\n");
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_88000960);
 
