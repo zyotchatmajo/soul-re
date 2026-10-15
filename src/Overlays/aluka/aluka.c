@@ -717,7 +717,7 @@ void ALUKA_JumpToEntry(Instance *instance, Position *target)
     mv->mode = 0x100000;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/aluka/aluka", ALUKA_SetJumpVels);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl ALUKA_SetJumpVels\n.type ALUKA_SetJumpVels, @function\nALUKA_SetJumpVels:\n.include \"asm/nonmatchings/Overlays/aluka/aluka/ALUKA_SetJumpVels.s\"\n.set reorder\n.set at\n");
 
 void ALUKA_SetHitGround(Instance *instance)
 {
@@ -735,9 +735,9 @@ void ALUKA_SetHitGround(Instance *instance)
     MON_SwitchState(instance, MONSTER_STATE_LANDONFEET);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/aluka/aluka", ALUKA_JumpTo);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl ALUKA_JumpTo\n.type ALUKA_JumpTo, @function\nALUKA_JumpTo:\n.include \"asm/nonmatchings/Overlays/aluka/aluka/ALUKA_JumpTo.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/aluka/aluka", ALUKA_ChooseAttack);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl ALUKA_ChooseAttack\n.type ALUKA_ChooseAttack, @function\nALUKA_ChooseAttack:\n.include \"asm/nonmatchings/Overlays/aluka/aluka/ALUKA_ChooseAttack.s\"\n.set reorder\n.set at\n");
 
 void ALUKA_Init(Instance *instance)
 {
