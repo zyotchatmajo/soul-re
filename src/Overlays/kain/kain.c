@@ -5,6 +5,8 @@
 #include "Game/GAMEPAD.h"
 #include "Game/INSTANCE.h"
 #include "Game/MATH3D.h"
+#include "Game/HASM.h"
+#include "Game/OBTABLE.h"
 #include "Game/PSX/SUPPORT.h"
 #include "Game/PLAN/PLANAPI.h"
 #include "Game/MEMPACK.h"
@@ -451,7 +453,173 @@ void KAIN_DamageEffect(Instance *instance, evFXHitData *data)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/kain/kain", KAIN_Message);
+void KAIN_Message(Instance *instance, unsigned long message, unsigned long data)
+{
+
+    MonsterVars *mv; // not from debug symbols
+    MonsterAttributes *ma; // not from debug symbols
+    KainVars *vars; // not from debug symbols
+    KainAttributes *attrs; // not from debug symbols
+    Instance *inst; // not from debug symbols
+    Instance *target; // not from debug symbols
+
+    mv = (MonsterVars *)instance->extraData;
+    ma = (MonsterAttributes *)instance->data;
+    vars = (KainVars *)mv->extraVars;
+    attrs = (KainAttributes *)ma->tunData;
+
+    if (vars == NULL || attrs == NULL)
+    {
+        MonsterMessage(instance, message, data);
+    }
+
+    switch (message)
+    {
+    case 0x1000020:
+        KAIN_EndEffects(instance);
+
+        if (SndIsPlaying(vars->soundHandle))
+        {
+            SndEndLoop(vars->soundHandle);
+        }
+
+        MON_SwitchStateDoEntry(instance, MONSTER_STATE_IDLE);
+        break;
+    case 0x1000023:
+        if (data != 0x1000)
+        {
+            break;
+        }
+    case 0x100001F:
+        if (CheckHit(instance))
+        {
+            if (mv->auxFlags & 0x10)
+            {
+                mv->auxFlags &= ~4;
+            }
+            else
+            {
+                mv->auxFlags |= 4;
+            }
+
+            mv->auxFlags &= ~0x40;
+            SwitchToHit(instance);
+        }
+        break;
+    case 0x1000000:
+        if (((evMonsterHitData *)data)->power >= 0x3000)
+        {
+            instance->constrictAngle = 0;
+        }
+
+        if (CheckHit(instance))
+        {
+            mv->auxFlags &= ~4;
+
+            if (!(mv->auxFlags & 0x10) || INSTANCE_Query(((evMonsterHitData *)data)->sender, queryWhatAmI) == 0x20)
+            {
+                mv->auxFlags &= ~0x40;
+            }
+            else
+            {
+                mv->auxFlags |= 0x40;
+            }
+
+            SwitchToHit(instance);
+        }
+        break;
+    case 0x80001:
+    case 0x80002:
+    case 0x80003:
+    case 0x80004:
+    case 0x80005:
+    case 0x80006:
+    case 0x1000019:
+    case 0x1000021:
+        if (CheckHit(instance))
+        {
+            mv->auxFlags &= ~4;
+            mv->auxFlags &= ~0x40;
+            SwitchToHit(instance);
+        }
+        break;
+    case 0x400000:
+        if (CheckHit(instance) && (mv->auxFlags & 0x44))
+        {
+            MonsterMessage(instance, 0x400000, data);
+        }
+        break;
+    case 0x1000017:
+        switch (data)
+        {
+        case 0:
+            mv->auxFlags |= 0x100;
+            MON_SwitchStateDoEntry(instance, MONSTER_STATE_IDLE);
+            break;
+        case 1:
+            if (mv->auxFlags & 8)
+            {
+                vars->tier++;
+            }
+
+            mv->auxFlags &= ~8;
+            break;
+        case 7:
+            vars->tier = 0;
+            vars->numHits = 0;
+            mv->auxFlags &= ~0x20;
+            break;
+        case 2:
+            inst = instance->LinkChild;
+
+            if (inst != NULL)
+            {
+                INSTANCE_Post(inst, 0x800008, 0);
+                INSTANCE_Post(inst, 0x800002, SetObjectData(0, 0, 0, instance, ma->rightWeaponSegment));
+                G2EmulationInstanceSetAnimation(inst, 0, 0, 0, 0);
+                G2EmulationInstanceSetMode(inst, 0, 1);
+            }
+            break;
+        case 3:
+            mv->auxFlags |= 0x200;
+            vars->zapTarget = gameTrackerX.playerInstance;
+            MON_SwitchStateDoEntry(instance, MONSTER_STATE_ATTACK);
+            break;
+        case 5:
+            mv->auxFlags |= 0x1000;
+            break;
+        case 6:
+            mv->auxFlags |= 0x2000;
+            MON_SwitchStateDoEntry(instance, MONSTER_STATE_IDLE);
+            break;
+        case 4:
+            mv->auxFlags |= 0x400;
+            break;
+        }
+        break;
+    case 0x1000022:
+        if (data != 0)
+        {
+            target = INSTANCE_Find(data);
+
+            if (target != NULL)
+            {
+                vars->zapTarget = target;
+                mv->auxFlags |= 0x200;
+                MON_SwitchStateDoEntry(instance, MONSTER_STATE_ATTACK);
+            }
+        }
+        else
+        {
+            mv->auxFlags |= 0x400;
+        }
+        break;
+    case 0x40009:
+        break;
+    default:
+        MonsterMessage(instance, message, data);
+    }
+}
 
 uintptr_t KAIN_Query(Instance *instance, unsigned long query)
 {
@@ -642,7 +810,77 @@ void KAIN_Idle(Instance *instance)
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/kain/kain", KAIN_CombatEntry);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/kain/kain", KAIN_Combat);
+void KAIN_Combat(Instance *instance)
+{
+
+    int time; // not from debug symbols
+    int timeLeft; // not from debug symbols
+    int timeToBolt; // not from debug symbols
+    int pitch; // not from debug symbols
+    int volume; // not from debug symbols
+    MonsterVars *mv; // not from debug symbols
+    KainVars *vars; // not from debug symbols
+    KainAttributes *attrs; // not from debug symbols
+
+    mv = (MonsterVars *)instance->extraData;
+    vars = (KainVars *)mv->extraVars;
+    attrs = (KainAttributes *)((MonsterAttributes *)instance->data)->tunData;
+
+    if (vars == NULL || attrs == NULL)
+    {
+        return;
+    }
+
+    if (mv->mvFlags & 4)
+    {
+        MON_SwitchState(instance, MONSTER_STATE_IDLE);
+    }
+    else
+    {
+        time = MON_GetTime(instance);
+        KAIN_ChargeUp(instance, time, mv->attackType->sphereSegment);
+
+        timeLeft = vars->timer - MON_GetTime(instance);
+
+        if (timeLeft < 0)
+        {
+            timeLeft = 0;
+        }
+
+        if (mv->auxFlags & 0x10)
+        {
+            timeToBolt = attrs->timeToBolt[vars->numHits] * 33;
+        }
+        else
+        {
+            timeToBolt = attrs->timeToBolt[vars->numHits + attrs->maxHits] * 33;
+        }
+
+        pitch = 100 - ((timeLeft * 300) / timeToBolt);
+        volume = 100 - ((timeLeft * 70) / timeToBolt);
+
+        if (SndIsPlaying(vars->soundHandle))
+        {
+            SOUND_Update3dSound(&instance->position, vars->soundHandle, pitch, volume, 32000);
+        }
+        else if (vars->field != NULL)
+        {
+            vars->soundHandle = SOUND_Play3dSound(&instance->position, 398, pitch, volume, 32000);
+        }
+
+        if (time >= vars->timer && MON_TurnToPosition(instance, &gameTrackerX.playerInstance->position, mv->subAttr->speedPivotTurn))
+        {
+            MON_SwitchState(instance, MONSTER_STATE_ATTACK);
+        }
+    }
+
+    MON_DefaultQueueHandler(instance);
+
+    if (instance->currentMainState != MONSTER_STATE_COMBAT && SndIsPlaying(vars->soundHandle))
+    {
+        SndEndLoop(vars->soundHandle);
+    }
+}
 
 void KAIN_AttackEntry(Instance *instance)
 {

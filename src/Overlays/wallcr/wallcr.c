@@ -3,6 +3,7 @@
 #include "Game/MONSTER/MONSTER.h"
 #include "Game/MONSTER/MONLIB.h"
 #include "Game/MONSTER/MONMSG.h"
+#include "Game/MONSTER/MONSENSE.h"
 #include "Game/PHYSICS.h"
 #include "Game/MEMPACK.h"
 #include "Game/MATH3D.h"
@@ -18,8 +19,7 @@ void MON_MoveToPosition(Instance *instance, Position *position, short turnSpeed)
 
 /* double-check that WALLCR_ShouldJumpOff and WALLCR_ShouldJumpOn aren't swapped */
 
-// this conditional is for the objdiff report
-#ifndef SKIP_ASM
+INCLUDE_RODATA("asm/nonmatchings/Overlays/wallcr/wallcr", D_88000000);
 
 void WALLCR_EnableControllers(Instance *instance)
 {
@@ -192,7 +192,182 @@ int WALLCR_AngleFromPosToPos(Position *oldPos, Position *newPos, Rotation *rotat
     return (ratan2(offset.z, -offset.x) + 3072) & 0xFFF;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_FollowWall);
+int WALLCR_FollowWall(Instance *instance)
+{
+    int flex = 0;
+    int i;
+    WallcrVars *vars = (WallcrVars *)((MonsterVars *)instance->extraData)->extraVars;
+    Level *level = STREAM_GetLevelWithID(instance->currentStreamUnitID);
+    SVECTOR points[3] = {{0, 0, 0, 0}, {0, 250, 250, 0}, {0, 250, -250, 0}};
+    MATRIX matrix;
+    TFace *tface[2];
+    Position hit[2];
+    Normal normals[2];
+    Rotation rotation;
+    G2SVector3 extraRot;
+    unsigned char edges[4][2] = {{0, 1}, {0, 2}, {1, 2}, {2, 1}};
+    int dist[2];
+    Position pos;
+    Normal normal;
+    SVECTOR in;
+    SVECTOR out;
+    Position zero = {0};
+    int count;
+    int total;
+    Normal *ref;
+    int upsideDown;
+
+    matrix.m[0][0] = 4096;
+    matrix.m[0][1] = 0;
+    matrix.m[0][2] = 0;
+    matrix.m[1][0] = 0;
+    matrix.m[1][1] = 4096;
+    matrix.m[1][2] = 0;
+    matrix.m[2][0] = 0;
+    matrix.m[2][1] = 0;
+    matrix.m[2][2] = 4096;
+
+    RotMatrixY(vars->roll, &matrix);
+    RotMatrixZ(instance->rotation.z, &matrix);
+    RotMatrixY(instance->rotation.y, &matrix);
+    RotMatrixX(instance->rotation.x, &matrix);
+
+    i = 0;
+    do
+    {
+        ApplyMatrixSV(&matrix, &points[i], &points[i]);
+        points[i].vx += instance->position.x;
+        points[i].vy += instance->position.y;
+        points[i].vz += instance->position.z;
+        i++;
+    } while (i < 3);
+
+    count = 0;
+    for (i = 0; i < 4; i++)
+    {
+        tface[count] = WALLCR_CollideFace(level, (Position *)&points[edges[i][0]], (Position *)&points[edges[i][1]], &hit[count], (Position *)&normals[count]);
+        if (tface[count] != NULL)
+        {
+            count++;
+            if (count == 2)
+            {
+                if (tface[1] != tface[0])
+                {
+                    break;
+                }
+                count = 1;
+            }
+        }
+    }
+
+    if (count == 0)
+    {
+        return 0;
+    }
+
+    switch (count)
+    {
+    case 1:
+        flex = 0;
+        COPY_SVEC(Normal, &normal, Normal, &normals[0]);
+        break;
+    case 2:
+        pos.x = instance->position.x - hit[0].x;
+        pos.y = instance->position.y - hit[0].y;
+        pos.z = instance->position.z - hit[0].z;
+        dist[0] = (short)((pos.x * normals[0].x) >> 12) + (short)((pos.y * normals[0].y) >> 12) + (short)((pos.z * normals[0].z) >> 12);
+        pos.x = instance->position.x - hit[1].x;
+        pos.y = instance->position.y - hit[1].y;
+        pos.z = instance->position.z - hit[1].z;
+        dist[1] = (short)((pos.x * normals[1].x) >> 12) + (short)((pos.y * normals[1].y) >> 12) + (short)((pos.z * normals[1].z) >> 12);
+
+        if (dist[0] < 100)
+        {
+            dist[0] = 100;
+        }
+        else if (dist[0] > 200)
+        {
+            dist[0] = 1;
+        }
+        else
+        {
+            dist[0] = 201 - dist[0];
+        }
+
+        if (dist[1] < 100)
+        {
+            dist[1] = 100;
+        }
+        else if (dist[1] > 200)
+        {
+            dist[1] = 1;
+        }
+        else
+        {
+            dist[1] = 201 - dist[1];
+        }
+
+        total = dist[0] + dist[1];
+        normal.x = ((dist[0] * normals[0].x) + (dist[1] * normals[1].x)) / total;
+        normal.y = ((dist[0] * normals[0].y) + (dist[1] * normals[1].y)) / total;
+        normal.z = ((dist[0] * normals[0].z) + (dist[1] * normals[1].z)) / total;
+        MATH3D_Normalize(&normal);
+
+        if (dist[0] < dist[1])
+        {
+            ref = &normals[1];
+        }
+        else
+        {
+            ref = &normals[0];
+        }
+        flex = MATH3D_AngleBetweenVectors((SVector *)&normal, (SVector *)ref);
+        break;
+    }
+
+    pos.x = instance->position.x - ((normal.x * 75) >> 10);
+    pos.y = instance->position.y - ((normal.y * 75) >> 10);
+    pos.z = instance->position.z - ((normal.z * 75) >> 10);
+
+    tface[0] = WALLCR_CollideFace(level, &instance->position, &pos, &pos, NULL);
+    if (tface[0] != NULL)
+    {
+
+        instance->position.x = pos.x + ((normal.x * 75) >> 11);
+        instance->position.y = pos.y + ((normal.y * 75) >> 11);
+        instance->position.z = pos.z + ((normal.z * 75) >> 11);
+        MATH3D_RotationFromPosToPos(&zero, (Position *)&normal, &rotation);
+
+        upsideDown = instance->rotation.y == -1024 && instance->rotation.z == -1024;
+        if (!upsideDown ? (rotation.x >= 1024) : (rotation.x < 1024))
+        {
+            int roll;
+            int angle;
+
+            in.vx = 0;
+            in.vy = -4096;
+            in.vz = 0;
+            ApplyMatrixSV(&matrix, &in, &out);
+            angle = MATH3D_AngleFromPosToPos(&zero, (Position *)&out) - rotation.z;
+            roll = vars->roll + angle;
+            extraRot.z = 0;
+            extraRot.x = 0;
+            extraRot.y = roll;
+            G2Anim_SetController_Vector(&instance->anim, 0, G2ANIM_CTRLRTYPE_ADD_LOCALROT, &extraRot);
+            vars->roll = roll;
+        }
+
+        WALLCR_SetFlex(instance, flex);
+        instance->oldTFace = instance->tface;
+        instance->tface = tface[0];
+        instance->tfaceLevel = level;
+        COPY_SVEC(Rotation, &instance->rotation, Rotation, &rotation);
+        MATH3D_ZYXtoXYZ(&instance->rotation);
+        return 1;
+    }
+
+    return 0;
+}
 
 int WALLCR_MoveForward(Instance *instance, Position *target)
 {
@@ -249,19 +424,208 @@ void WALLCR_ApplySpin(Instance *instance, int time)
     instance->rotation.z += (vars->yaw_speed * time) / 4096;
 }
 
-INCLUDE_RODATA("asm/nonmatchings/Overlays/wallcr/wallcr", D_88000000);
+void WALLCR_AttachEntry(Instance *instance, Position *point, Position *normal)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+    WallcrVars *vars;
+    Position zero = {0};
+    Rotation rotation;
 
-INCLUDE_RODATA("asm/nonmatchings/Overlays/wallcr/wallcr", D_88000020);
+    if (mv != NULL)
+    {
+        vars = (WallcrVars *)mv->extraVars;
+        if (vars != NULL)
+        {
+            MATH3D_RotationFromPosToPos(&zero, normal, &rotation);
 
-INCLUDE_RODATA("asm/nonmatchings/Overlays/wallcr/wallcr", D_88000038);
+            if (instance->position.z < point->z)
+            {
+                WALLCR_EnableControllers(instance);
+                vars->yaw_speed = (((rotation.z - instance->rotation.z) & 0xFFF) > 2048 ? ((rotation.z - instance->rotation.z) & 0xFFF) - 4096 : (rotation.z - instance->rotation.z) & 0xFFF) / 13;
+                vars->roll_speed = 0;
+                vars->correct_roll_speed = 0;
+                vars->roll = 0;
+                vars->pitch_speed = (((rotation.x - instance->rotation.x) & 0xFFF) > 2048 ? ((rotation.x - instance->rotation.x) & 0xFFF) - 4096 : (rotation.x - instance->rotation.x) & 0xFFF) / 13;
+                vars->time = MON_GetTime(instance);
+                instance->xVel = ((point->x + ((normal->x * 75) >> 11)) - instance->position.x) / 13;
+                instance->yVel = ((point->y + ((normal->y * 75) >> 11)) - instance->position.y) / 13;
+                instance->zVel = 42;
+                instance->zAccl = -3;
+                mv->mvFlags |= 0x800;
+                mv->auxFlags |= 3;
+                MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 0, 1);
+            }
+            else
+            {
+                printf("oh shit, too high\n");
+            }
+        }
+    }
+}
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_AttachEntry);
+void WALLCR_Attach(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+    WallcrVars *vars = (WallcrVars *)mv->extraVars;
+    int time;
+    int last_time;
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Attach);
+    if (vars != NULL)
+    {
+        if (MON_AnimPlayingFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 2))
+        {
+            if (instance->flags2 & 0x10)
+            {
+                mv->auxFlags &= ~1;
+                mv->auxFlags = (mv->auxFlags & ~8) | 4;
+            }
+        }
+        else
+        {
+            time = MON_GetTime(instance) - vars->time;
+            last_time = time - gameTrackerX.lastLoopTime;
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_DetachEntry);
+            if (time >= 99)
+            {
+                WALLCR_ApplySpin(instance, gameTrackerX.timeMult);
+            }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Detach);
+            if (time >= 165)
+            {
+                PhysicsMove(instance, &instance->position, gameTrackerX.timeMult);
+            }
+
+            if (last_time < 429 && time >= 429)
+            {
+                MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 1, 1);
+            }
+
+            if (time >= 462)
+            {
+                if (WALLCR_FollowWall(instance))
+                {
+                    MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 2, 1);
+                    instance->zAccl = 0;
+                    instance->zVel = 0;
+                    instance->yVel = 0;
+                    instance->xVel = 0;
+                    vars->roll = 0;
+                    vars->pitch_speed = 0;
+                    vars->roll_speed = 0;
+                    vars->yaw_speed = 0;
+                }
+
+                if (time >= 594)
+                {
+                    WALLCR_DetachEntry(instance, NULL);
+                }
+            }
+        }
+    }
+}
+
+void WALLCR_DetachEntry(Instance *instance, Position *target)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+    WallcrVars *vars = (WallcrVars *)mv->extraVars;
+
+    if (vars != NULL)
+    {
+        if (target == NULL)
+        {
+            MATRIX matrix;
+            SVECTOR in;
+            SVECTOR out;
+
+            RotMatrix((SVECTOR *)&instance->rotation, &matrix);
+            in.vx = 0;
+            in.vy = -20;
+            in.vz = 0;
+            ApplyMatrixSV(&matrix, &in, &out);
+            instance->xVel = out.vx;
+            instance->yVel = out.vy;
+            instance->zVel = out.vz + 42;
+        }
+        else
+        {
+            instance->xVel = (target->x - instance->position.x) / 15;
+            instance->yVel = (target->y - instance->position.y) / 15;
+            instance->zVel = ((target->z - instance->position.z) + 2236) / 15;
+        }
+
+        instance->zAccl = -16;
+        vars->yaw_speed = 136;
+        vars->pitch_speed = (((-instance->rotation.x) & 0xFFF) > 2048 ? ((-instance->rotation.x) & 0xFFF) - 4096 : (-instance->rotation.x) & 0xFFF) / 15;
+        vars->roll_speed = (((-vars->roll) & 0xFFF) > 2048 ? ((-vars->roll) & 0xFFF) - 4096 : (-vars->roll) & 0xFFF) / 15;
+
+        vars->correct_roll_speed = (((-instance->rotation.y) & 0xFFF) > 2048 ? ((-instance->rotation.y) & 0xFFF) - 4096 : (-instance->rotation.y) & 0xFFF) / 15;
+        vars->time = MON_GetTime(instance);
+        mv->auxFlags = ((mv->auxFlags & ~4) | 1) & ~2;
+
+        if (mv->auxFlags & 0x10)
+        {
+            MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 11, 1);
+        }
+        else
+        {
+            MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 3, 1);
+        }
+    }
+}
+
+void WALLCR_Detach(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+    WallcrVars *vars = (WallcrVars *)mv->extraVars;
+
+    if (vars != NULL)
+    {
+        if (MON_AnimPlayingFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 5))
+        {
+            if (instance->flags2 & 0x10)
+            {
+                mv->auxFlags &= ~1;
+            }
+        }
+        else
+        {
+            PhysicsMove(instance, &instance->position, gameTrackerX.timeMult);
+            WALLCR_ApplySpin(instance, gameTrackerX.timeMult);
+
+            if ((unsigned long)(MON_GetTime(instance) - vars->time) >= 495)
+            {
+                WALLCR_DisableControllers(instance);
+                vars->roll = 0;
+                vars->pitch_speed = 0;
+                vars->correct_roll_speed = 0;
+                vars->roll_speed = 0;
+                vars->yaw_speed = 0;
+                instance->rotation.x = 0;
+                instance->rotation.y = 0;
+            }
+
+            mv->mvFlags &= ~0x800;
+            MON_OnGround(instance);
+
+            if (mv->mvFlags & 2)
+            {
+                WALLCR_DisableControllers(instance);
+                instance->rotation.x = 0;
+                instance->rotation.y = 0;
+                vars->roll = 0;
+                instance->zAccl = 0;
+                instance->zVel = 0;
+                instance->yVel = 0;
+                instance->xVel = 0;
+                MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 5, 1);
+            }
+            else
+            {
+                mv->mvFlags |= 0x800;
+            }
+        }
+    }
+}
 
 int WALLCR_SeekPath(Instance *instance, Position *outputPos, Position *targetPos, int unused, int validNodeTypes)
 {
@@ -344,7 +708,89 @@ int WALLCR_ShouldSurpriseAttack(Instance *instance)
     return 0;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_MoveToDestination);
+int WALLCR_MoveToDestination(Instance *instance, Position *target)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+    Position pos;
+    int result;
+
+    MON_DefaultQueueHandler(instance);
+
+    if (mv->auxFlags & 1)
+    {
+        if (mv->auxFlags & 2)
+        {
+            WALLCR_Attach(instance);
+        }
+        else
+        {
+            WALLCR_Detach(instance);
+        }
+    }
+    else if (mv->auxFlags & 4)
+    {
+        result = WALLCR_SeekPath(instance, &pos, &mv->destination, 0, 0x181A1F);
+        if (result != 0)
+        {
+            if (result == 3)
+            {
+                if (instance->currentMainState == MONSTER_STATE_SURPRISEATTACK)
+                {
+                    MON_SwitchState(instance, MONSTER_STATE_PURSUE);
+                }
+            }
+            else if (WALLCR_ShouldJumpOn(instance))
+            {
+                if (ENMYPLAN_GetPosOfNextWaypoint(mv->pathSlotID, &pos))
+                {
+                    WALLCR_DetachEntry(instance, &pos);
+                }
+            }
+            else
+            {
+                WALLCR_MoveForward(instance, &pos);
+            }
+        }
+    }
+    else
+    {
+        Position jumpPos;
+        Position normal;
+
+        result = WALLCR_SeekPath(instance, &pos, &mv->destination, 0, 0x181A1F);
+
+        if (target != NULL)
+        {
+            COPY_SVEC(Position, target, Position, &pos);
+        }
+
+        if (result != 0)
+        {
+            if (result != 3)
+            {
+                if (WALLCR_ShouldJumpOff(instance))
+                {
+                    ENMYPLAN_GetPosOfNextWaypoint(mv->pathSlotID, &jumpPos);
+                    if (MON_TurnToPosition(instance, &jumpPos, mv->subAttr->speedRunTurn) &&
+                        WALLCR_FindJumpOnPoint(instance, &jumpPos, &normal) != NULL)
+                    {
+                        WALLCR_AttachEntry(instance, &jumpPos, &normal);
+                        return 1;
+                    }
+                }
+            }
+            else if (instance->currentMainState == MONSTER_STATE_SURPRISEATTACK)
+            {
+                MON_SwitchState(instance, MONSTER_STATE_PURSUE);
+                return 1;
+            }
+        }
+
+        return 0;
+    }
+
+    return 1;
+}
 
 void WALLCR_Message(Instance *instance, unsigned long message, unsigned long data)
 {
@@ -511,7 +957,62 @@ void WALLCR_SurpriseAttackEntry(Instance *instance)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_SurpriseAttack);
+void WALLCR_SurpriseAttack(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+    MonsterIR *enemy = mv->enemy;
+    Position target;
+    Position *jumpTarget;
+
+    if (mv->mvFlags & 4)
+    {
+        MON_SwitchState(instance, MONSTER_STATE_IDLE);
+        MON_DefaultQueueHandler(instance);
+    }
+    else if (mv->auxFlags & 0x20)
+    {
+        if (!WALLCR_MoveToDestination(instance, &target))
+        {
+            if (!MON_AnimPlaying(instance, MONSTER_ANIM_RUN))
+            {
+                MON_PlayAnim(instance, MONSTER_ANIM_RUN, 2);
+            }
+            MON_MoveToPosition(instance, &target, mv->subAttr->speedRunTurn);
+            mv->mvFlags |= 0x20000;
+        }
+
+        if (instance->currentMainState != MONSTER_STATE_FALL)
+        {
+            if (mv->auxFlags & 0x10)
+            {
+                if (!(mv->auxFlags & 1))
+                {
+                    MON_TurnOffWeaponSpheres(instance);
+                    mv->auxFlags &= ~0x10;
+                    MONSENSE_SetEnemy(instance, gameTrackerX.playerInstance);
+                    MON_SwitchState(instance, MONSTER_STATE_PURSUE);
+                }
+            }
+            else if (MATH3D_LengthXYZ(instance->position.x - mv->destination.x,
+                                      instance->position.y - mv->destination.y,
+                                      instance->position.z - mv->destination.z) < 300)
+            {
+                jumpTarget = NULL;
+                if (enemy != NULL && instance->position.z > mv->destination.z)
+                {
+                    jumpTarget = &enemy->instance->position;
+                }
+                mv->auxFlags |= 0x10;
+                WALLCR_DetachEntry(instance, jumpTarget);
+                MON_TurnOnWeaponSpheres(instance);
+            }
+        }
+    }
+    else
+    {
+        MON_SurpriseAttack(instance);
+    }
+}
 
 void WALLCR_IdleEntry(Instance *instance)
 {
@@ -557,7 +1058,64 @@ int WALLCR_ShouldIAmbushPlayer(Instance *instance)
                             player->position.z - instance->position.z) < mv->ambushRange;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Idle);
+void WALLCR_Idle(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+    MonsterIR *enemy = mv->enemy;
+
+    if (mv->mvFlags & 4)
+    {
+        if (mv->auxFlags & 4)
+        {
+            WALLCR_DetachEntry(instance, NULL);
+        }
+
+        if (mv->auxFlags & 1)
+        {
+            MON_DefaultQueueHandler(instance);
+            WALLCR_Detach(instance);
+
+            if (mv->auxFlags & 1)
+            {
+                return;
+            }
+
+            MON_IdleEntry(instance);
+        }
+
+        MON_Idle(instance);
+    }
+    else if (mv->auxFlags & 4)
+    {
+        MON_DefaultQueueHandler(instance);
+
+        if (enemy != NULL)
+        {
+            MON_SwitchState(instance, MONSTER_STATE_PURSUE);
+        }
+        else if (WALLCR_ShouldIAmbushPlayer(instance))
+        {
+            mv->auxFlags |= 0x30;
+            WALLCR_DetachEntry(instance, &gameTrackerX.playerInstance->position);
+            MON_SwitchState(instance, MONSTER_STATE_SURPRISEATTACK);
+        }
+        else if (!MON_AnimPlayingFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 7))
+        {
+            if (rand() < 109)
+            {
+                MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 7, 1);
+            }
+        }
+        else if (instance->flags2 & 0x10)
+        {
+            MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 6, 2);
+        }
+    }
+    else
+    {
+        MON_Idle(instance);
+    }
+}
 
 void WALLCR_WanderEntry(Instance *instance)
 {
@@ -848,111 +1406,3 @@ void WALLCR_Pupate(Instance *instance)
         PhysicsSetVelFromRot(instance, &instance->rotation, 15);
     }
 }
-
-#else
-
-void WALLCR_EnableControllers(void) { };
-
-void WALLCR_DisableControllers(void) { };
-
-void WALLCR_SetFlex(void) { };
-
-void WALLCR_CollideFace(void) { };
-
-void WALLCR_NearFloor(void) { };
-
-void WALLCR_FindJumpOnPoint(void) { };
-
-void WALLCR_AngleFromPosToPos(void) { };
-
-void WALLCR_FollowWall(void) { };
-
-void WALLCR_MoveForward(void) { };
-
-void WALLCR_ApplySpin(void) { };
-
-void WALLCR_AttachEntry(void) { };
-
-void WALLCR_Attach(void) { };
-
-void WALLCR_DetachEntry(void) { };
-
-void WALLCR_Detach(void) { };
-
-void WALLCR_SeekPath(void) { };
-
-void WALLCR_ShouldJumpOff(void) { };
-
-void WALLCR_ShouldJumpOn(void) { };
-
-void WALLCR_ShouldSurpriseAttack(void) { };
-
-void WALLCR_MoveToDestination(void) { };
-
-void WALLCR_Message(void) { };
-
-void WALLCR_Query(void) { };
-
-void WALLCR_Init(void) { };
-
-void WALLCR_CleanUp(void) { };
-
-void WALLCR_PursueEntry(void) { };
-
-void WALLCR_Pursue(void) { };
-
-void WALLCR_SurpriseAttackEntry(void) { };
-
-void WALLCR_SurpriseAttack(void) { };
-
-void WALLCR_IdleEntry(void) { };
-
-void WALLCR_ShouldIAmbushPlayer(void) { };
-
-void WALLCR_Idle(void) { };
-
-void WALLCR_WanderEntry(void) { };
-
-void WALLCR_Wander(void) { };
-
-void WALLCR_FallEntry(void) { };
-
-void WALLCR_Fall(void) { };
-
-void WALLCR_ImpactEntry(void) { };
-
-void WALLCR_Impact(void) { };
-
-void WALLCR_GeneralDeathEntry(void) { };
-
-void WALLCR_GeneralDeath(void) { };
-
-void WALLCR_HitEntry(void) { };
-
-void WALLCR_Hit(void) { };
-
-void WALLCR_MissileHitEntry(void) { };
-
-void WALLCR_MissileHit(void) { };
-
-void WALLCR_NoticeEntry(void) { };
-
-void WALLCR_Notice(void) { };
-
-void WALLCR_SurprisedEntry(void) { };
-
-void WALLCR_Surprised(void) { };
-
-void WALLCR_StunnedEntry(void) { };
-
-void WALLCR_Stunned(void) { };
-
-void WALLCR_ThrownEntry(void) { };
-
-void WALLCR_Thrown(void) { };
-
-void WALLCR_PupateEntry(void) { };
-
-void WALLCR_Pupate(void) { };
-
-#endif

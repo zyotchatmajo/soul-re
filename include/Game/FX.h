@@ -28,6 +28,8 @@ void FX_DrawScreenPoly(int transtype, unsigned long color, int zdepth);
 void FX_CalcSpiral(int degchange);
 void FX_GetSpiralPoint(int radius, int deg, int *x, int *y);
 void FX_DeleteGeneralEffect(FXGeneralEffect *effect);
+FXLightning *FX_CreateLightning(Instance *instance, int lifeTime, int deg, int deg_inc, int width, int small_width, int segs, int sine_size, int variation, unsigned long color, unsigned long glow_color);
+void FX_SetLightingPos(FXLightning *zap, Instance *startInstance, int startSeg, Position *startOffset, Instance *endInstance, int endSeg, Position *endOffset, int matrixSeg);
 void FX_StandardFXPrimProcess(FX_PRIM *fxPrim, FXTracker *fxTracker);
 long FX_GetHealthColor(int currentHealth);
 FXGlowEffect *FX_DoInstanceOneSegmentGlow(Instance *instance, long segment, long *color, long numColors, long atuColorCycleRate, long width, long height);

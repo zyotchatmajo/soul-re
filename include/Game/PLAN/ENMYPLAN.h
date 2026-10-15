@@ -10,5 +10,6 @@ void ENMYPLAN_InitEnemyPlanPool(void *enemyPlanPool);
 int ENMYPLAN_MoveToTargetFinal(Instance *instance, Position *outputPos, int slotID, Position *targetPos, int validNodeTypes);
 int ENMYPLAN_GetNodeTypeOfNextWaypoint(int slotID);
 int ENMYPLAN_PathClear(Position *pos, Position *target);
+int ENMYPLAN_GetPosOfNextWaypoint(int slotID, Position *pos);
 
 #endif

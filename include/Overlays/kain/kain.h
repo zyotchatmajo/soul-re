@@ -32,11 +32,11 @@ typedef struct _KainVars
     // offset: 0x001C
     Instance *zapTarget;
     // offset: 0x0020
-    char hitSegment[3];
+    unsigned char hitSegment[3];
     // offset: 0x0023
-    char numBeams;
+    unsigned char numBeams;
     // offset: 0x0024
-    char changeBeam;
+    unsigned char changeBeam;
     // offset: 0x0025
     char tier;
     // offset: 0x0028

@@ -72,7 +72,95 @@ int SKINBOS_Turn(Instance *instance, Position *target, int limit)
     return 1;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/skinbos/skinbos", SKINBOS_GateDrop);
+int SKINBOS_GateDrop(Instance *instance)
+{
+
+    long dist[4]; // not from debug symbols
+    Normal forward; // not from debug symbols
+    Position center; // not from debug symbols
+    Position rel; // not from debug symbols
+    Position side[2]; // not from debug symbols
+    StreamUnit *streamUnit; // not from debug symbols
+    MonsterVars *mv; // not from debug symbols
+    SkinbosVars *vars; // not from debug symbols
+    SkinbosAttributes *attrs; // not from debug symbols
+
+    mv = (MonsterVars *)instance->extraData;
+    vars = (SkinbosVars *)mv->extraVars;
+    attrs = (SkinbosAttributes *)((MonsterAttributes *)instance->data)->tunData;
+
+    streamUnit = STREAM_GetStreamUnitWithID(instance->currentStreamUnitID);
+
+    if (vars->phase_level == 0)
+    {
+        if (mv->auxFlags & 2)
+        {
+            PLANAPI_FindNodePositionInUnit(streamUnit, &center, attrs->gate_one_center_marker, 5);
+            PLANAPI_FindNodePositionInUnit(streamUnit, (Position *)&forward, attrs->gate_one_forward_marker, 5);
+            PLANAPI_FindNodePositionInUnit(streamUnit, &side[0], attrs->gate_one_side_one_marker, 5);
+            PLANAPI_FindNodePositionInUnit(streamUnit, &side[1], attrs->gate_one_side_two_marker, 5);
+        }
+        else
+        {
+            PLANAPI_FindNodePositionInUnit(streamUnit, &center, attrs->gate_zero_center_marker, 5);
+            PLANAPI_FindNodePositionInUnit(streamUnit, (Position *)&forward, attrs->gate_zero_forward_marker, 5);
+            PLANAPI_FindNodePositionInUnit(streamUnit, &side[0], attrs->gate_zero_side_one_marker, 5);
+            PLANAPI_FindNodePositionInUnit(streamUnit, &side[1], attrs->gate_zero_side_two_marker, 5);
+        }
+
+        rel.x = instance->position.x - center.x;
+        rel.y = instance->position.y - center.y;
+        rel.z = instance->position.z - center.z;
+
+        forward.x -= center.x;
+        forward.y -= center.y;
+        forward.z -= center.z;
+
+        MATH3D_Normalize(&forward);
+
+        dist[0] = ((rel.x * forward.x) + (rel.y * forward.y) + (rel.z * forward.z)) >> 12;
+
+        rel.x = (instance->position.x - side[0].x) - ((forward.x * dist[0]) >> 12);
+        rel.y = (instance->position.y - side[0].y) - ((forward.y * dist[0]) >> 12);
+        rel.z = (instance->position.z - side[0].z) - ((forward.z * dist[0]) >> 12);
+
+        side[0].x = side[1].x - side[0].x;
+        side[0].y = side[1].y - side[0].y;
+        side[0].z = side[1].z - side[0].z;
+
+        dist[2] = MATH3D_LengthXYZ(side[0].x, side[0].y, side[0].z);
+        dist[3] = MATH3D_LengthXYZ(rel.x, rel.y, rel.z);
+
+        dist[1] = (rel.x * side[0].x) + (rel.y * side[0].y) + (rel.z * side[0].z);
+
+        if (dist[1] < 0)
+        {
+            return 0;
+        }
+
+        if (dist[3] >= dist[2])
+        {
+            return 0;
+        }
+
+        if (-attrs->hit_distance < dist[0] && dist[0] < attrs->hit_distance)
+        {
+            return 3;
+        }
+
+        if (dist[0] < -attrs->hit_distance && -(attrs->stop_distance + attrs->hit_distance) < dist[0])
+        {
+            return 1;
+        }
+
+        if (attrs->hit_distance < dist[0] && dist[0] < (attrs->forward_distance + attrs->hit_distance))
+        {
+            return 2;
+        }
+    }
+
+    return 0;
+}
 
 int SKINBOS_CheckPointInsideMasher(Instance *instance, Position *position, int which_border)
 {
@@ -238,7 +326,78 @@ void SKINBOS_DoPhaseFade(Instance *instance, int limit)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/skinbos/skinbos", SKINBOS_HandleOneShotAnims);
+int SKINBOS_HandleOneShotAnims(Instance *instance)
+{
+
+    MonsterVars *mv; // not from debug symbols
+    SkinbosVars *vars; // not from debug symbols
+
+    mv = (MonsterVars *)instance->extraData;
+    vars = (SkinbosVars *)mv->extraVars;
+
+    if (vars == NULL)
+    {
+        return 0;
+    }
+
+    switch (vars->anim_state)
+    {
+    case 0:
+        return 0;
+    case 10:
+        SKINBOS_DoPhaseFade(instance, 7);
+        return 1;
+    case 11:
+        SKINBOS_DoPhaseFade(instance, 0);
+        return 1;
+    case 8:
+        if (mv->auxFlags & 0x10)
+        {
+            MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 8, 1);
+            mv->auxFlags &= ~0x10;
+            mv->auxFlags &= ~0x20;
+            vars->anim_state = 9;
+        }
+        break;
+    case 3:
+        if (MON_GetTime(instance) >= (unsigned long)vars->stop_timer)
+        {
+            vars->anim_state = 0;
+        }
+        break;
+    default:
+        if (instance->flags2 & 0x10)
+        {
+            switch (vars->anim_state)
+            {
+            case 1:
+                MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 11, 1);
+                instance->rotation.z = (instance->rotation.z + 1024) & 0xFFF;
+                vars->anim_state = 13;
+                break;
+            case 2:
+                MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 12, 1);
+                instance->rotation.z = (instance->rotation.z - 1024) & 0xFFF;
+                vars->anim_state = 14;
+                break;
+            case 6:
+                MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 7, 1);
+                vars->anim_state = 7;
+                break;
+            case 7:
+                vars->anim_state = 8;
+                mv->auxFlags = (mv->auxFlags | 0x20) & ~0x10;
+                break;
+            default:
+                vars->anim_state = 0;
+                break;
+            }
+        }
+        break;
+    }
+
+    return 1;
+}
 
 void SKINBOS_DoPhasingOutInit(Instance *instance, SVector *normal, SVector *point)
 {
@@ -549,7 +708,146 @@ void SKINBOS_DamageEffect(Instance *instance, evFXHitData *data)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/skinbos/skinbos", SKINBOS_Message);
+void SKINBOS_Message(Instance *instance, unsigned long message, unsigned long data)
+{
+
+    SVector normal; // not from debug symbols
+    Position gateOnePos; // not from debug symbols
+    Position gateZeroPos; // not from debug symbols
+    Position *point; // not from debug symbols
+    int time; // not from debug symbols
+    MonsterVars *mv; // not from debug symbols
+    SkinbosVars *vars; // not from debug symbols
+    SkinbosAttributes *attrs; // not from debug symbols
+
+    mv = (MonsterVars *)instance->extraData;
+    vars = (SkinbosVars *)mv->extraVars;
+    attrs = (SkinbosAttributes *)((MonsterAttributes *)instance->data)->tunData;
+
+    if (vars == NULL || attrs == NULL)
+    {
+        MonsterMessage(instance, message, data);
+    }
+
+    switch (message)
+    {
+    case 0x100001F:
+    case 0x1000021:
+        time = MON_GetTime(instance);
+
+        if (((vars->phase_level == 0 && gameTrackerX.gameData.asmData.MorphType == 0) || (vars->phase_level == 7 && gameTrackerX.gameData.asmData.MorphType == 1)) &&
+            time >= vars->last_hit_timer && instance->currentMainState != MONSTER_STATE_ATTACK && (vars->anim_state < 6 || vars->anim_state > 9))
+        {
+            vars->last_hit_timer = time + 6930;
+            ((evMonsterHitData *)data)->power = 4096;
+            MonsterMessage(instance, message, data);
+        }
+        break;
+    case 0x400000:
+        if ((vars->phase_level == 0 && gameTrackerX.gameData.asmData.MorphType == 0) || (vars->phase_level == 7 && gameTrackerX.gameData.asmData.MorphType == 1))
+        {
+            MonsterMessage(instance, message, data);
+        }
+        break;
+    case 0x1000000:
+        time = MON_GetTime(instance);
+
+        if (((vars->phase_level == 0 && gameTrackerX.gameData.asmData.MorphType == 0) || (vars->phase_level == 7 && gameTrackerX.gameData.asmData.MorphType == 1)) &&
+            time >= vars->last_hit_timer && instance->currentMainState != MONSTER_STATE_ATTACK && (vars->anim_state < 6 || vars->anim_state > 9))
+        {
+            vars->last_hit_timer = time + 6930;
+            MonsterMessage(instance, message, data);
+        }
+        break;
+    case 0x1000020:
+        mv->auxFlags |= 0x40;
+        MON_SwitchStateDoEntry(instance, MONSTER_STATE_IDLE);
+        break;
+    case 0x1000017:
+        switch (data)
+        {
+        case 1:
+            mv->auxFlags &= ~2;
+            break;
+        case 2:
+            mv->auxFlags |= 2;
+            break;
+        case 3:
+            vars->gate_drop_pos = SKINBOS_GateDrop(instance);
+            mv->auxFlags |= 1;
+            break;
+        case 0:
+            mv->damageType = 0x400;
+            MON_SwitchStateDoEntry(instance, MONSTER_STATE_GENERALDEATH);
+            break;
+        case 4:
+            mv->auxFlags |= 0x10;
+            break;
+        }
+        break;
+    case 0x1000007:
+        if (((evMonsterHitTerrainData *)data)->faceFlags & 0x1000)
+        {
+            Terrain *terrain; // not from debug symbols
+            SVector *vertex; // not from debug symbols
+            BSPTree *bspTree; // not from debug symbols
+
+            terrain = STREAM_GetLevelWithID(instance->currentStreamUnitID)->terrain;
+
+            if (terrain != NULL)
+            {
+                vertex = (SVector *)&terrain->vertexList[((evMonsterHitTerrainData *)data)->tface->face.v0];
+                bspTree = &terrain->BSPTreeArray[instance->bspTree];
+
+                ADD_SVEC(SVector, &normal, SVector, vertex, Position, &bspTree->globalOffset);
+
+                SKINBOS_DoPhasingOutInit(instance, (SVector *)&((evMonsterHitTerrainData *)data)->normal, &normal);
+            }
+        }
+        break;
+    case 0x1000008:
+        if (strcmpi(((evMonsterHitObjectData *)data)->instance->object->name, D_88000060) == 0)
+        {
+            StreamUnit *streamUnit; // not from debug symbols
+
+            point = &gateOnePos;
+            streamUnit = STREAM_GetStreamUnitWithID(instance->currentStreamUnitID);
+
+            if (streamUnit != NULL)
+            {
+                PLANAPI_FindNodePositionInUnit(streamUnit, point, attrs->gate_one_center_marker, 5);
+                PLANAPI_FindNodePositionInUnit(streamUnit, &gateZeroPos, attrs->gate_zero_center_marker, 5);
+
+                if (MATH3D_LengthXY(instance->position.x - gateOnePos.x, instance->position.y - gateOnePos.y) < MATH3D_LengthXY(instance->position.x - gateZeroPos.x, instance->position.y - gateZeroPos.y))
+                {
+                    PLANAPI_FindNodePositionInUnit(streamUnit, (Position *)&normal, attrs->gate_one_forward_marker, 5);
+                }
+                else
+                {
+                    point = &gateZeroPos;
+                    PLANAPI_FindNodePositionInUnit(streamUnit, (Position *)&normal, attrs->gate_zero_forward_marker, 5);
+                }
+
+                SUB_SVEC(SVector, &normal, SVector, &normal, Position, point);
+                MATH3D_Normalize((Normal *)&normal);
+            }
+
+            SKINBOS_DoPhasingOutInit(instance, &normal, (SVector *)point);
+        }
+        break;
+    case 0x80001:
+    case 0x80002:
+    case 0x80003:
+    case 0x80004:
+    case 0x80005:
+    case 0x80006:
+    case 0x40009:
+    case 0x40017:
+        break;
+    default:
+        MonsterMessage(instance, message, data);
+    }
+}
 
 uintptr_t SKINBOS_Query(Instance *instance, unsigned long query)
 {
