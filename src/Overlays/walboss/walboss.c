@@ -102,7 +102,17 @@ __asm__(
     ".set at\n"
 );
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_EjectEgg);
+__asm__(
+    ".section .text\n"
+    ".set noat\n"
+    ".set noreorder\n"
+    ".globl WALBOSS_EjectEgg\n"
+    ".type WALBOSS_EjectEgg, @function\n"
+    "WALBOSS_EjectEgg:\n"
+    ".include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_EjectEgg.s\"\n"
+    ".set reorder\n"
+    ".set at\n"
+);
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_BirthEggEntry);
 
