@@ -42,7 +42,7 @@ void WALBOSS_SetSegmentYaw(Instance *instance, int yaw)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_InterpSegmentYaw);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl WALBOSS_InterpSegmentYaw\n.type WALBOSS_InterpSegmentYaw, @function\nWALBOSS_InterpSegmentYaw:\n.include \"asm/nonmatchings/Overlays/walboss/walboss/WALBOSS_InterpSegmentYaw.s\"\n.set reorder\n.set at\n");
 
 void WALBOSS_TurnToPosition(Instance *instance, Position *target)
 {
