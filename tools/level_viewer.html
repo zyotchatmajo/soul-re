@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Soul Reaver 3D Level Viewer</title>
+  <style>
+    :root { color-scheme: dark; --panel: #111827; --panel2: #182235; --line: #2e3c55; --text: #e7edf7; --muted: #9aa8bd; --accent: #7dd3fc; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #080d16; color: var(--text); font: 14px "Segoe UI", system-ui, sans-serif; }
+    #app { display: grid; grid-template-columns: 320px 1fr; height: 100%; }
+    aside { padding: 18px; background: var(--panel); border-right: 1px solid var(--line); overflow: auto; }
+    h1 { margin: 0 0 4px; font-size: 20px; font-weight: 650; }
+    h2 { margin: 20px 0 8px; font-size: 13px; color: var(--accent); text-transform: uppercase; letter-spacing: .08em; }
+    p { color: var(--muted); line-height: 1.45; }
+    label { display: block; margin: 10px 0 5px; color: var(--muted); }
+    select, button { width: 100%; border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; color: var(--text); background: var(--panel2); font: inherit; }
+    button { cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .stat { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid rgba(255,255,255,.06); padding: 5px 0; }
+    .stat span:first-child { color: var(--muted); }
+    .stat span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+    #markers { max-height: 270px; overflow: auto; border: 1px solid var(--line); border-radius: 5px; }
+    .marker { padding: 5px 7px; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 12px; }
+    .marker:last-child { border-bottom: 0; }
+    .marker-kind { display: inline-block; width: 45px; color: var(--accent); text-transform: uppercase; font-size: 10px; }
+    .marker-pos { color: var(--muted); margin-left: 45px; }
+    #viewport { position: relative; min-width: 0; }
+    canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+    canvas.dragging { cursor: grabbing; }
+    #hud { position: absolute; left: 16px; right: 16px; top: 14px; display: flex; justify-content: space-between; pointer-events: none; color: var(--muted); text-shadow: 0 1px 2px #000; }
+    #status { color: var(--accent); }
+    .help { font-size: 12px; }
+    input[type=checkbox] { accent-color: #38bdf8; }
+    .check { display: flex; align-items: center; gap: 7px; margin: 11px 0; color: var(--muted); }
+  </style>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <h1>Soul Reaver 3D Viewer</h1>
+    <p>Inspect extracted DRM terrain and its gameplay markers. The viewer is read-only; edits remain in the scene-patch workflow.</p>
+    <h2>Level</h2>
+    <label for="asset">DRM asset</label>
+    <select id="asset"></select>
+    <div class="row" style="margin-top:8px">
+      <button id="reset">Reset view</button>
+      <button id="reload">Reload asset</button>
+    </div>
+    <h2>Display</h2>
+    <label class="check"><input id="wire" type="checkbox"> wireframe overlay</label>
+    <label class="check"><input id="markersToggle" type="checkbox" checked> scene markers</label>
+    <h2>Geometry</h2>
+    <div id="stats"><div class="stat"><span>Status</span><span id="status">Loading…</span></div></div>
+    <h2>Markers</h2>
+    <div id="markers"><div class="marker">No markers loaded.</div></div>
+    <p class="help">Drag to orbit. Shift-drag to pan. Mouse wheel zooms. X/Y are the level plane; Z is height.</p>
+  </aside>
+  <main id="viewport">
+    <canvas id="canvas"></canvas>
+    <div id="hud"><span id="title">No asset selected</span><span>WebGL</span></div>
+  </main>
+</div>
+<script>
+"use strict";
+const canvas = document.getElementById("canvas");
+const gl = canvas.getContext("webgl", { antialias: true, preserveDrawingBuffer: false });
+const statusEl = document.getElementById("status");
+const titleEl = document.getElementById("title");
+const assetSelect = document.getElementById("asset");
+const markersEl = document.getElementById("markers");
+const wireToggle = document.getElementById("wire");
+const markersToggle = document.getElementById("markersToggle");
+if (!gl) { statusEl.textContent = "WebGL unavailable"; throw new Error("WebGL unavailable"); }
+
+const vertexSource = `
+  attribute vec3 a_position;
+  attribute vec3 a_color;
+  uniform mat4 u_matrix;
+  varying vec3 v_color;
+  void main() { gl_Position = u_matrix * vec4(a_position, 1.0); v_color = a_color; gl_PointSize = 9.0; }
+`;
+const fragmentSource = `
+  precision mediump float;
+  varying vec3 v_color;
+  void main() { gl_FragColor = vec4(v_color, 1.0); }
+`;
+function shader(type, source) { const s = gl.createShader(type); gl.shaderSource(s, source); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
+const program = gl.createProgram();
+gl.attachShader(program, shader(gl.VERTEX_SHADER, vertexSource));
+gl.attachShader(program, shader(gl.FRAGMENT_SHADER, fragmentSource));
+gl.linkProgram(program);
+if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+gl.useProgram(program);
+const positionLoc = gl.getAttribLocation(program, "a_position");
+const colorLoc = gl.getAttribLocation(program, "a_color");
+const matrixLoc = gl.getUniformLocation(program, "u_matrix");
+
+let model = null;
+let geometryBuffer = null;
+let colorBuffer = null;
+let indexBuffer = null;
+let markerBuffer = null;
+let markerColorBuffer = null;
+let markerCount = 0;
+let indexCount = 0;
+let view = { yaw: 0.75, pitch: 0.7, distance: 2.7, panX: 0, panY: 0, target: [0, 0, 0], scale: 1 };
+let drag = null;
+
+function mat4Multiply(a, b) {
+  const o = new Float32Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) o[c*4+r] = a[r] * b[c*4] + a[4+r] * b[c*4+1] + a[8+r] * b[c*4+2] + a[12+r] * b[c*4+3];
+  return o;
+}
+function perspective(fov, aspect, near, far) {
+  const f = 1 / Math.tan(fov / 2), nf = 1 / (near - far);
+  return new Float32Array([f/aspect,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,(2*far*near)*nf,0]);
+}
+function lookAt(eye, target, up) {
+  let zx = eye[0]-target[0], zy = eye[1]-target[1], zz = eye[2]-target[2]; let l = Math.hypot(zx,zy,zz); zx/=l; zy/=l; zz/=l;
+  let xx = up[1]*zz-up[2]*zy, xy = up[2]*zx-up[0]*zz, xz = up[0]*zy-up[1]*zx; l = Math.hypot(xx,xy,xz); xx/=l; xy/=l; xz/=l;
+  const yx = zy*xz-zz*xy, yy = zz*xx-zx*xz, yz = zx*xy-zy*xx;
+  return new Float32Array([xx,yx,zx,0, xy,yy,zy,0, xz,yz,zz,0, -(xx*eye[0]+xy*eye[1]+xz*eye[2]), -(yx*eye[0]+yy*eye[1]+yz*eye[2]), -(zx*eye[0]+zy*eye[1]+zz*eye[2]),1]);
+}
+function matrix() {
+  const aspect = canvas.width / Math.max(canvas.height, 1);
+  const target = [view.panX, view.panY, 0];
+  const cp = Math.cos(view.pitch), sp = Math.sin(view.pitch), sy = Math.sin(view.yaw), cy = Math.cos(view.yaw);
+  const eye = [target[0] + view.distance*cp*sy, target[1] + view.distance*sp, target[2] + view.distance*cp*cy];
+  return mat4Multiply(perspective(Math.PI/4, aspect, 0.01, 100), lookAt(eye, target, [0,1,0]));
+}
+function resize() { const dpr = Math.min(window.devicePixelRatio || 1, 2); const w = Math.floor(canvas.clientWidth*dpr), h = Math.floor(canvas.clientHeight*dpr); if (canvas.width !== w || canvas.height !== h) { canvas.width=w; canvas.height=h; gl.viewport(0,0,w,h); } }
+function putAttribute(buffer, location, size) { gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.enableVertexAttribArray(location); gl.vertexAttribPointer(location, size, gl.FLOAT, false, 0, 0); }
+function colorForHeight(height, min, max) { const t = Math.max(0, Math.min(1, (height-min)/Math.max(max-min,1))); return [0.13+0.25*t, 0.34+0.45*t, 0.32+0.45*t]; }
+function markerColor(kind) { return kind === "intro" ? [0.95,0.32,0.34] : kind === "plan" ? [0.35,0.65,0.95] : [0.98,0.78,0.25]; }
+function clearBuffers() { for (const b of [geometryBuffer,colorBuffer,indexBuffer,markerBuffer,markerColorBuffer]) if (b) gl.deleteBuffer(b); geometryBuffer=colorBuffer=indexBuffer=markerBuffer=markerColorBuffer=null; markerCount=0; indexCount=0; }
+function loadModel(data) {
+  clearBuffers(); model=data;
+  const s=data.summary, min=s.bounds_min, max=s.bounds_max;
+  const cx=(min[0]+max[0])/2, cy=(min[1]+max[1])/2, cz=(min[2]+max[2])/2;
+  const scale=Math.max(max[0]-min[0],max[1]-min[1],max[2]-min[2],1)/2;
+  view.scale=scale; view.target=[0,0,0]; view.panX=0; view.panY=0; view.distance=2.7; view.yaw=.75; view.pitch=.7;
+  const positions=[], colors=[];
+  for (const v of data.vertices) { positions.push((v[0]-cx)/scale, (v[2]-cz)/scale, (v[1]-cy)/scale); const c=colorForHeight(v[2],min[2],max[2]); colors.push(c[0],c[1],c[2]); }
+  const indices=[];
+  for (const f of data.faces) if (f[0]<data.vertices.length && f[1]<data.vertices.length && f[2]<data.vertices.length) indices.push(f[0],f[1],f[2]);
+  indexCount=indices.length;
+  geometryBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,geometryBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(positions),gl.STATIC_DRAW);
+  colorBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,colorBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(colors),gl.STATIC_DRAW);
+  indexBuffer=gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint32Array(indices),gl.STATIC_DRAW);
+  // WebGL1 does not guarantee uint32 element indices. Soul Reaver area meshes are small enough for 16-bit indices.
+  if (data.vertices.length > 65535) throw new Error("mesh exceeds WebGL1 index range");
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(indices),gl.STATIC_DRAW);
+  const mpos=[], mcolors=[];
+  for (const m of data.markers) { mpos.push((m.x-cx)/scale,(m.z-cz)/scale,(m.y-cy)/scale); const c=markerColor(m.kind); mcolors.push(c[0],c[1],c[2]); }
+  markerCount=data.markers.length;
+  markerBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,markerBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(mpos),gl.STATIC_DRAW);
+  markerColorBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,markerColorBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(mcolors),gl.STATIC_DRAW);
+  titleEl.textContent=data.path;
+  statusEl.textContent=`${data.vertices.length.toLocaleString()} verts / ${data.faces.length.toLocaleString()} faces`;
+  document.getElementById("stats").innerHTML = `<div class="stat"><span>Vertices</span><span>${data.vertices.length.toLocaleString()}</span></div><div class="stat"><span>Faces</span><span>${data.faces.length.toLocaleString()}</span></div><div class="stat"><span>Markers</span><span>${data.markers.length.toLocaleString()}</span></div><div class="stat"><span>Bounds</span><span>${min.join(", ")} → ${max.join(", ")}</span></div>`;
+  markersEl.innerHTML = data.markers.length ? data.markers.map(m => `<div class="marker"><span class="marker-kind">${m.kind}</span>${escapeHtml(m.name)}<div class="marker-pos">(${m.x}, ${m.y}, ${m.z})</div></div>`).join("") : '<div class="marker">No markers in this asset.</div>';
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+function render() {
+  resize(); gl.enable(gl.DEPTH_TEST); gl.clearColor(.025,.045,.08,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT); if (!model) { requestAnimationFrame(render); return; }
+  gl.useProgram(program); gl.uniformMatrix4fv(matrixLoc,false,matrix()); putAttribute(geometryBuffer,positionLoc,3); putAttribute(colorBuffer,colorLoc,3); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.drawElements(gl.TRIANGLES,indexCount,gl.UNSIGNED_SHORT,0);
+  if (wireToggle.checked) { gl.disable(gl.DEPTH_TEST); gl.lineWidth(1); gl.drawElements(gl.LINE_STRIP,indexCount,gl.UNSIGNED_SHORT,0); gl.enable(gl.DEPTH_TEST); }
+  if (markersToggle.checked && markerCount) { gl.disable(gl.DEPTH_TEST); putAttribute(markerBuffer,positionLoc,3); putAttribute(markerColorBuffer,colorLoc,3); gl.drawArrays(gl.POINTS,0,markerCount); gl.enable(gl.DEPTH_TEST); }
+  requestAnimationFrame(render);
+}
+async function fetchJson(url) { const r=await fetch(url); if (!r.ok) throw new Error(await r.text()); return await r.json(); }
+async function loadPath(path) { statusEl.textContent="Loading…"; try { loadModel(await fetchJson(`/api/drm?path=${encodeURIComponent(path)}`)); history.replaceState(null,"",`?drm=${encodeURIComponent(path)}`); } catch(e) { statusEl.textContent="Error"; markersEl.innerHTML=`<div class="marker">${escapeHtml(e.message)}</div>`; } }
+async function init() { try { const list=await fetchJson("/api/list"); assetSelect.innerHTML=list.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); const wanted=new URLSearchParams(location.search).get("drm"); const initial=wanted && list.includes(wanted) ? wanted : (list.includes("city/bin/city2.drm") ? "city/bin/city2.drm" : list[0]); if(initial){ assetSelect.value=initial; await loadPath(initial); } } catch(e) { statusEl.textContent="Error"; markersEl.innerHTML=`<div class="marker">${escapeHtml(e.message)}</div>`; } }
+assetSelect.addEventListener("change",()=>loadPath(assetSelect.value));
+document.getElementById("reload").addEventListener("click",()=>loadPath(assetSelect.value));
+document.getElementById("reset").addEventListener("click",()=>{ if(model){view.panX=0;view.panY=0;view.distance=2.7;view.yaw=.75;view.pitch=.7;} });
+canvas.addEventListener("pointerdown",e=>{drag={x:e.clientX,y:e.clientY,pan:e.shiftKey||e.button===1};canvas.classList.add("dragging");canvas.setPointerCapture(e.pointerId);});
+canvas.addEventListener("pointerup",e=>{drag=null;canvas.classList.remove("dragging");canvas.releasePointerCapture(e.pointerId);});
+canvas.addEventListener("pointermove",e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.x=e.clientX;drag.y=e.clientY;if(drag.pan){view.panX-=dx*.004*view.distance;view.panY+=dy*.004*view.distance;}else{view.yaw-=dx*.008;view.pitch=Math.max(-1.45,Math.min(1.45,view.pitch-dy*.008));}});
+canvas.addEventListener("wheel",e=>{e.preventDefault();view.distance=Math.max(.2,Math.min(30,view.distance*Math.exp(e.deltaY*.001)));},{passive:false});
+window.addEventListener("resize",resize); init(); requestAnimationFrame(render);
+</script>
+</body>
+</html>

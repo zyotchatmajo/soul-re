@@ -76,7 +76,46 @@ loader and writes a new container; it never overwrites `game/BIGFILE.DAT`.
 python tools/level_editor.py --gui
 ```
 
-The GUI is read-only for now. Select an area and one of its assets to inspect
-the path, size, hash, and binary header. The next implementation step is to
-decode a selected `.crm`/`.drm` into vertices, faces, instances, and markers,
-then add an export path that round-trips one asset before enabling edits.
+The desktop GUI is read-only. Select an area and one of its assets to inspect
+the path, size, hash, and binary header; use the WebGL viewer below when you
+need to see decoded DRM geometry and markers in 3D.
+
+## Interactive 3D viewer
+
+The extracted DRM terrain can also be inspected in a local WebGL viewer. It
+does not require Node, a package install, or an internet connection:
+
+```bash
+python tools/level_viewer.py --open
+```
+
+If the browser does not open automatically, visit the URL printed by the
+command. Drag the canvas to orbit, hold Shift while dragging to pan, and use
+the mouse wheel to zoom. The asset selector lists every extracted `.drm`, and
+the sidebar reports geometry bounds and scene markers. The `wireframe overlay`
+and `scene markers` checkboxes are display-only; source files are never changed.
+
+The server accepts an alternate extraction root or initial asset when needed:
+
+```bash
+python tools/level_viewer.py \
+  --root game/bigfile/kain2/area \
+  --drm city/bin/city2.drm \
+  --port 8765
+```
+
+The same viewer and DRM tools work against the PC remaster's loose `AREA`
+directory. For example, the installed `city9.drm` was parsed successfully
+with the original relocation layout, geometry arrays, and marker structures:
+
+```powershell
+python tools/level_viewer.py `
+  --root 'F:\SteamLibrary\steamapps\common\Soul Reaver I-II\1\AREA' `
+  --drm CITY/BIN/city9.drm `
+  --open
+```
+
+Keep a backup of the Steam install and write modified assets to a staging
+folder first. The remaster also contains packed archives, so a file may be
+loaded from an archive rather than the loose tree; that precedence needs to be
+verified per asset before distributing a replacement.
