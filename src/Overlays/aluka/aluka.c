@@ -814,7 +814,7 @@ void ALUKA_CleanUp(Instance *instance)
     MON_CleanUp(instance);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/aluka/aluka", ALUKA_Message);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl ALUKA_Message\n.type ALUKA_Message, @function\nALUKA_Message:\n.include \"asm/nonmatchings/Overlays/aluka/aluka/ALUKA_Message.s\"\n.set reorder\n.set at\n");
 
 void ALUKA_PursueEntry(Instance *instance)
 {
@@ -857,7 +857,7 @@ void ALUKA_PursueEntry(Instance *instance)
     mv->mode = 4;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/aluka/aluka", ALUKA_Pursue);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl ALUKA_Pursue\n.type ALUKA_Pursue, @function\nALUKA_Pursue:\n.include \"asm/nonmatchings/Overlays/aluka/aluka/ALUKA_Pursue.s\"\n.set reorder\n.set at\n");
 
 void ALUKA_AttackEntry(Instance *instance)
 {
@@ -1219,7 +1219,7 @@ void ALUKA_Idle(Instance *instance)
     ALUKA_SwimToDestination(instance);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/aluka/aluka", ALUKA_LandInWaterEntry);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl ALUKA_LandInWaterEntry\n.type ALUKA_LandInWaterEntry, @function\nALUKA_LandInWaterEntry:\n.include \"asm/nonmatchings/Overlays/aluka/aluka/ALUKA_LandInWaterEntry.s\"\n.set reorder\n.set at\n");
 
 void ALUKA_LandInWater(Instance *instance)
 {
