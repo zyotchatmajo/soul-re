@@ -395,6 +395,88 @@ def _srl_animation(path: Path) -> dict[str, object]:
     }
 
 
+def _sra_animation_catalog(path: Path) -> dict[str, object]:
+    """Read the embedded G2 animation list from an object SRA archive.
+
+    SRA files are relocatable PS1 object modules.  Their module root is a
+    pointer array terminated by ``0xFFFFFFFF``; each entry points at a
+    ``G2AnimKeylist``.  The keylists contain the clip timing and pointers to
+    the compressed channel streams.  This deliberately stops at the catalog
+    layer: the channel streams use the original G2 adaptive/linear codecs and
+    need the source model's segment hierarchy to turn them into SRM skin
+    matrices.
+    """
+    data = path.read_bytes()
+    module_offset, relocation_count = _module_offset(data)
+    module_size = len(data) - module_offset
+
+    def u32(relative: int) -> int:
+        if relative < 0 or relative + 4 > module_size:
+            raise ValueError("SRA field is outside the module")
+        return struct.unpack_from("<I", data, module_offset + relative)[0]
+
+    def checked_pointer(value: int, label: str) -> int:
+        if value == 0 or value >= module_size:
+            raise ValueError(f"SRA {label} pointer is outside the module")
+        return value
+
+    clips: list[dict[str, object]] = []
+    root_offset = 0
+    while root_offset + 4 <= module_size:
+        keylist_offset = u32(root_offset)
+        root_offset += 4
+        if keylist_offset == 0xFFFFFFFF:
+            break
+        if len(clips) >= 256:
+            raise ValueError("SRA animation list is unreasonably long")
+        keylist_offset = checked_pointer(keylist_offset, "keylist")
+        if keylist_offset + 0x14 > module_size:
+            raise ValueError("SRA keylist header is outside the module")
+        section_count, s0_tail, s1_tail, s2_tail, key_count, time_per_key = struct.unpack_from(
+            "<4B H h", data, module_offset + keylist_offset
+        )
+        if section_count > 3 or key_count > 10000 or time_per_key < 0:
+            raise ValueError("SRA keylist metadata is unreasonable")
+        section_pointers: list[int] = []
+        for section in range(section_count):
+            section_pointer = u32(keylist_offset + 0x14 + section * 4)
+            section_pointers.append(checked_pointer(section_pointer, f"section {section}"))
+        flag_offset = keylist_offset + 0x14 + section_count * 4
+        if flag_offset >= module_size:
+            raise ValueError("SRA keylist flags are outside the module")
+        clips.append(
+            {
+                "index": len(clips),
+                "keylist_offset": keylist_offset,
+                "section_count": section_count,
+                "key_count": key_count,
+                "time_per_key": time_per_key,
+                "duration_ms": key_count * time_per_key,
+                "tail_times": [s0_tail, s1_tail, s2_tail],
+                "section_data_offsets": section_pointers,
+                "flags_offset": flag_offset,
+                "flags": data[module_offset + flag_offset],
+            }
+        )
+    else:
+        raise ValueError("SRA animation list has no terminator")
+
+    return {
+        "format": "soul-re-view-sra-v1",
+        "asset_type": "sra",
+        "path": path.as_posix(),
+        "summary": {
+            "path": str(path),
+            "file_size": len(data),
+            "module_offset": module_offset,
+            "module_size": module_size,
+            "relocation_count": relocation_count,
+            "animation_count": len(clips),
+        },
+        "clips": clips,
+    }
+
+
 def _safe_asset(root: Path, requested: str) -> Path:
     candidate = (root / unquote(requested)).resolve()
     try:
@@ -443,6 +525,19 @@ def _safe_animation_asset(root: Path | None, requested: str) -> Path:
         raise ValueError("animation asset path escapes the configured object root") from exc
     if candidate.suffix.lower() != ".srl" or not candidate.is_file():
         raise FileNotFoundError(f"SRL animation not found: {requested}")
+    return candidate
+
+
+def _safe_sra_asset(root: Path | None, requested: str) -> Path:
+    if root is None:
+        raise FileNotFoundError("object asset root is not configured")
+    candidate = (root / unquote(requested)).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("SRA path escapes the configured object root") from exc
+    if candidate.suffix.lower() != ".sra" or not candidate.is_file():
+        raise FileNotFoundError(f"SRA animation archive not found: {requested}")
     return candidate
 
 
@@ -529,6 +624,17 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 )
                 self._json(HTTPStatus.OK, assets)
                 return
+            if parsed.path == "/api/sra-list":
+                if self.object_root is None:
+                    self._json(HTTPStatus.OK, [])
+                    return
+                assets = sorted(
+                    path.relative_to(self.object_root).as_posix()
+                    for path in self.object_root.rglob("*")
+                    if path.is_file() and path.suffix.lower() == ".sra"
+                )
+                self._json(HTTPStatus.OK, assets)
+                return
             if parsed.path == "/api/object":
                 requested = parse_qs(parsed.query).get("path", [""])[0]
                 if not requested:
@@ -542,6 +648,12 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 if not requested:
                     raise ValueError("missing SRL animation path")
                 self._json(HTTPStatus.OK, _srl_animation(_safe_animation_asset(self.object_root, requested)))
+                return
+            if parsed.path == "/api/sra":
+                requested = parse_qs(parsed.query).get("path", [""])[0]
+                if not requested:
+                    raise ValueError("missing SRA animation archive path")
+                self._json(HTTPStatus.OK, _sra_animation_catalog(_safe_sra_asset(self.object_root, requested)))
                 return
             if parsed.path == "/api/write-status":
                 self._json(
