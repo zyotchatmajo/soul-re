@@ -418,7 +418,7 @@ long COLLIDE_WithinXYBounds(SVector* point, HBox* hbox)
     return ((point->x >= hbox->minX) && (point->x <= hbox->maxX)) && ((point->y >= hbox->minY) && (point->y <= hbox->maxY));
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/COLLIDE", COLLIDE_LineWithBoxFace);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl COLLIDE_LineWithBoxFace\n.type COLLIDE_LineWithBoxFace, @function\nCOLLIDE_LineWithBoxFace:\n.include \"asm/nonmatchings/Game/COLLIDE/COLLIDE_LineWithBoxFace.s\"\n.set reorder\n.set at\n");
 
 long COLLIDE_IntersectLineAndBox(SVector *point0, SVector *normal0, SVector *point1, SVector *normal1, SVector *end, SVector *start, HBox *hbox)
 {
@@ -489,9 +489,9 @@ TFace *COLLIDE_PointAndTerrain(Terrain *terrain, PCollideInfo *pcollideInfo, LCo
     return COLLIDE_PointAndTerrainFunc(terrain, pcollideInfo, 0, NULL, 0, 0, lcol);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/COLLIDE", COLLIDE_PointAndTerrainFunc);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl COLLIDE_PointAndTerrainFunc\n.type COLLIDE_PointAndTerrainFunc, @function\nCOLLIDE_PointAndTerrainFunc:\n.include \"asm/nonmatchings/Game/COLLIDE/COLLIDE_PointAndTerrainFunc.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Game/COLLIDE", COLLIDE_PointAndHFace);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl COLLIDE_PointAndHFace\n.type COLLIDE_PointAndHFace, @function\nCOLLIDE_PointAndHFace:\n.include \"asm/nonmatchings/Game/COLLIDE/COLLIDE_PointAndHFace.s\"\n.set reorder\n.set at\n");
 
 void COLLIDE_PointAndInstance(PCollideInfo *pcollideInfo, Instance *instance)
 {
@@ -2501,7 +2501,7 @@ void COLLIDE_InstanceTerrain(Instance *instance, Level *level)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/COLLIDE", COLLIDE_LineWithSignals);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl COLLIDE_LineWithSignals\n.type COLLIDE_LineWithSignals, @function\nCOLLIDE_LineWithSignals:\n.include \"asm/nonmatchings/Game/COLLIDE/COLLIDE_LineWithSignals.s\"\n.set reorder\n.set at\n");
 
 void COLLIDE_InstanceTerrainSignal(Instance *instance, Level *level)
 {
@@ -2812,7 +2812,7 @@ void COLLIDE_SegmentCollisionOff(Instance *instance, int segment)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/COLLIDE", COLLIDE_FindCollisionFaceNormal);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl COLLIDE_FindCollisionFaceNormal\n.type COLLIDE_FindCollisionFaceNormal, @function\nCOLLIDE_FindCollisionFaceNormal:\n.include \"asm/nonmatchings/Game/COLLIDE/COLLIDE_FindCollisionFaceNormal.s\"\n.set reorder\n.set at\n");
 
 short *COLLIDE_GetBSPTreeFlag(CollideInfo *collideInfo)
 {
