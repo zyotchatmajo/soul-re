@@ -2,10 +2,13 @@
 #include "Game/MONSTER/MONAPI.h"
 #include "Game/MONSTER/MONSTER.h"
 #include "Game/MONSTER/MONLIB.h"
+#include "Game/MONSTER/MONMSG.h"
 #include "Game/PHYSICS.h"
 #include "Game/MEMPACK.h"
+#include "Game/MATH3D.h"
 #include "Game/G2/ANMCTRLR.h"
 #include "Game/PLAN/ENMYPLAN.h"
+#include "Game/STATE.h"
 
 /* double-check that WALLCR_ShouldJumpOff and WALLCR_ShouldJumpOn aren't swapped */
 
@@ -171,7 +174,33 @@ void WALLCR_CleanUp(Instance *instance)
     MON_CleanUp(instance);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_PursueEntry);
+void WALLCR_PursueEntry(Instance *instance)
+{
+    MonsterVars *mv;
+    MonsterIR *enemy;
+
+    mv = (MonsterVars *)instance->extraData;
+    enemy = mv->enemy;
+
+    if ((mv->auxFlags & 4) && !(mv->mvFlags & 4))
+    {
+        MON_GetPlanSlot(mv);
+        if (enemy != NULL)
+        {
+            COPY_SVEC(Position, &mv->destination, Position, &enemy->instance->position);
+        }
+        else
+        {
+            COPY_SVEC(Position, &mv->destination, Position, &instance->position);
+        }
+        mv->mode = 4;
+        mv->mvFlags &= ~0x20000;
+    }
+    else
+    {
+        MON_PursueEntry(instance);
+    }
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Pursue);
 
@@ -191,13 +220,42 @@ void WALLCR_SurpriseAttackEntry(Instance *instance)
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_SurpriseAttack);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_IdleEntry);
+void WALLCR_IdleEntry(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+
+    if (mv->auxFlags & 4)
+    {
+        MON_PlayAnimFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 6, 2);
+    }
+    else
+    {
+        MON_PlayRandomIdle(instance, 2);
+        MON_IdleEntry(instance);
+    }
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_ShouldIAmbushPlayer);
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Idle);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_WanderEntry);
+void WALLCR_WanderEntry(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+
+    if (mv->mvFlags & 4)
+    {
+        MON_GetPlanSlot(mv);
+    }
+    else if (!(mv->auxFlags & 4))
+    {
+        MON_WanderEntry(instance);
+    }
+    else
+    {
+        WALLCR_DetachEntry(instance, NULL);
+    }
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Wander);
 
@@ -222,7 +280,27 @@ void WALLCR_Fall(Instance *instance)
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_ImpactEntry);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Impact);
+void WALLCR_Impact(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+
+    if (mv->extraVars != NULL)
+    {
+        if (MON_AnimPlayingFromList(instance, ((MonsterAttributes *)instance->data)->auxAnimList, 2))
+        {
+            if (instance->flags2 & 0x10)
+            {
+                mv->auxFlags = (mv->auxFlags & ~1) | 4;
+                MON_SwitchState(instance, MONSTER_STATE_IDLE);
+            }
+            MON_DefaultQueueHandler(instance);
+        }
+        else
+        {
+            MON_Impact(instance);
+        }
+    }
+}
 
 void WALLCR_GeneralDeathEntry(Instance *instance)
 {
@@ -345,7 +423,32 @@ void WALLCR_ThrownEntry(Instance *instance)
     MON_ThrownEntry(instance);
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/wallcr/wallcr", WALLCR_Thrown);
+void WALLCR_Thrown(Instance *instance)
+{
+    MonsterVars *mv = (MonsterVars *)instance->extraData;
+
+    if (!(mv->mvFlags & 2))
+    {
+        MessageQueue tempQueue;
+        Message *message;
+
+        InitMessageQueue(&tempQueue);
+        while ((message = DeMessageQueue(&mv->messageQueue)) != NULL)
+        {
+            if (message->ID != 0x100000E && message->ID != 0x1000012)
+            {
+                EnMessageQueueData(&tempQueue, message->ID, message->Data);
+            }
+        }
+
+        while ((message = DeMessageQueue(&tempQueue)) != NULL)
+        {
+            EnMessageQueueData(&mv->messageQueue, message->ID, message->Data);
+        }
+    }
+
+    MON_Thrown(instance);
+}
 
 void WALLCR_PupateEntry(Instance *instance)
 {

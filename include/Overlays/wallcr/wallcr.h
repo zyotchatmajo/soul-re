@@ -34,5 +34,6 @@ typedef struct _WallcrVars
 void WALLCR_EnableControllers(Instance *instance);
 void WALLCR_DisableControllers(Instance *instance);
 void WALLCR_SetFlex(Instance *instance, int flex);
+void WALLCR_DetachEntry(Instance *instance, Position *target);
 
 #endif
