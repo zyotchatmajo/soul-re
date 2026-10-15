@@ -1,5 +1,6 @@
 #include "Overlays/walboss/walboss.h"
 #include "Game/G2/ANMCTRLR.h"
+#include "Game/MATH3D.h"
 
 // this conditional is for the objdiff report
 #ifndef SKIP_ASM
@@ -41,7 +42,13 @@ void WALBOSS_SetSegmentYaw(Instance *instance, int yaw)
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_InterpSegmentYaw);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_TurnToPosition);
+void WALBOSS_TurnToPosition(Instance *instance, Position *target)
+{
+    int angle;
+    angle = MATH3D_AngleFromPosToPos(&instance->position, target);
+    angle = (short)angle - instance->rotation.z;
+    WALBOSS_InterpSegmentYaw(instance, angle & 0xFFF);
+}
 
 INCLUDE_ASM("asm/nonmatchings/Overlays/walboss/walboss", WALBOSS_ChooseAttack);
 
