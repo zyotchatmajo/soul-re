@@ -335,7 +335,7 @@ void KAIN_LightningEntry(Instance *instance)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/kain/kain", KAIN_Lightning);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl KAIN_Lightning\n.type KAIN_Lightning, @function\nKAIN_Lightning:\n.include \"asm/nonmatchings/Overlays/kain/kain/KAIN_Lightning.s\"\n.set reorder\n.set at\n");
 
 void KAIN_FFieldOffset(Instance *instance, int segment, Position *position)
 {
@@ -808,7 +808,7 @@ void KAIN_Idle(Instance *instance)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/kain/kain", KAIN_CombatEntry);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl KAIN_CombatEntry\n.type KAIN_CombatEntry, @function\nKAIN_CombatEntry:\n.include \"asm/nonmatchings/Overlays/kain/kain/KAIN_CombatEntry.s\"\n.set reorder\n.set at\n");
 
 void KAIN_Combat(Instance *instance)
 {
