@@ -56,13 +56,13 @@ void func_88000510(mcpsx_t *mcpsx, int err)
 	mcpsx->state.observed = 0;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_88000528);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_88000528\nfunc_88000528:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_88000528.s\"\n.set reorder\n.set at\n");
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_8800053C);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_8800053C\nfunc_8800053C:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_8800053C.s\"\n.set reorder\n.set at\n");
 
 INCLUDE_RODATA("asm/nonmatchings/Overlays/mcardx/mcardx", D_88000000);
 
-INCLUDE_ASM("asm/nonmatchings/Overlays/mcardx/mcardx", func_8800055C);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl func_8800055C\nfunc_8800055C:\n.include \"asm/nonmatchings/Overlays/mcardx/mcardx/func_8800055C.s\"\n.set reorder\n.set at\n");
 
 void func_880006B8(mcpsx_t *mcpsx)
 {
