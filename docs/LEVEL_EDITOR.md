@@ -1,0 +1,50 @@
+# Level editor first milestone
+
+The repository now includes a read-only browser for the extracted Soul Reaver
+BIGFILE area assets. The binary formats contain PlayStation pointer-rich
+structures, so the browser is intentionally an inspection tool until geometry
+parsing and relocation are verified.
+
+## Extract the prototype assets
+
+From WSL, in the repository root:
+
+```bash
+export PATH=/home/kevin/.local/bin:/home/kevin/.venvs/soul-re/bin:$PATH
+cd-dat-utils unpack config/cd-dat-utils/config.yaml
+```
+
+The command creates `game/bigfile` from `game/BIGFILE.DAT`.
+
+## Text inventory
+
+From the repository root on Windows or WSL:
+
+```bash
+python tools/level_editor.py
+python tools/level_editor.py --area city
+python tools/level_editor.py --manifest build/level-inventory.json
+python tools/level_editor.py --inspect city/bin/city2.drm
+python tools/level_editor.py --inspect city/bin/city2.drm --obj build/city2-terrain.obj
+```
+
+The report groups files by area and identifies the companion asset types:
+`.drm` object data, `.crm` room data, `.smf` streamed model data, and `.snf`
+stream metadata. The manifest includes sizes, headers, and SHA-1 hashes so
+future parser changes can be regression-tested against the extracted data.
+
+The DRM inspector validates the relocation-table boundary, reads the serialized
+`Level`/`Terrain` headers, reports geometry counts and bounds, and can export
+the terrain vertex/face arrays to a coordinate-only Wavefront OBJ. The OBJ is
+an inspection export; it does not replace the original game asset.
+
+## Desktop browser
+
+```bash
+python tools/level_editor.py --gui
+```
+
+The GUI is read-only for now. Select an area and one of its assets to inspect
+the path, size, hash, and binary header. The next implementation step is to
+decode a selected `.crm`/`.drm` into vertices, faces, instances, and markers,
+then add an export path that round-trips one asset before enabling edits.
