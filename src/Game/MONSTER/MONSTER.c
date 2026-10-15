@@ -232,7 +232,7 @@ void MON_DeadEntry(Instance *instance)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/MONSTER/MONSTER", MON_Dead);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl MON_Dead\nMON_Dead:\n.include \"asm/nonmatchings/Game/MONSTER/MONSTER/MON_Dead.s\"\n.set reorder\n.set at\n");
 
 void MON_MissileHitEntry(Instance *instance)
 {
@@ -862,7 +862,7 @@ void MON_ImpaleDeath(Instance *instance)
     }
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/MONSTER/MONSTER", MON_TerrainImpaleDeathEntry);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl MON_TerrainImpaleDeathEntry\nMON_TerrainImpaleDeathEntry:\n.include \"asm/nonmatchings/Game/MONSTER/MONSTER/MON_TerrainImpaleDeathEntry.s\"\n.set reorder\n.set at\n");
 
 void MON_TerrainImpaleDeath(Instance *instance)
 {
@@ -1719,7 +1719,7 @@ void MON_PursueEntry(Instance *instance)
     mv->mvFlags &= ~0x20000;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/MONSTER/MONSTER", MON_Pursue);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl MON_Pursue\nMON_Pursue:\n.include \"asm/nonmatchings/Game/MONSTER/MONSTER/MON_Pursue.s\"\n.set reorder\n.set at\n");
 
 void MON_WanderEntry(Instance *instance)
 {
@@ -2520,7 +2520,7 @@ int MONSTER_CalcDamageIntensity(int hp, int maxHp)
     return ((maxHp - hp) * 256) / maxHp;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/MONSTER/MONSTER", MONSTER_ProcessClosestVerts);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl MONSTER_ProcessClosestVerts\nMONSTER_ProcessClosestVerts:\n.include \"asm/nonmatchings/Game/MONSTER/MONSTER/MONSTER_ProcessClosestVerts.s\"\n.set reorder\n.set at\n");
 
 void ProcessBloodyMess(Instance *instance, int vertidx, int segidx, int dist, void *cb_data)
 {
@@ -2628,7 +2628,7 @@ int MONSTER_StartVertexBlood(Instance *instance, SVector *location, int amount)
     return -1;
 }
 
-INCLUDE_ASM("asm/nonmatchings/Game/MONSTER/MONSTER", MONSTER_VertexBlood);
+__asm__(".section .text\n.set noat\n.set noreorder\n.globl MONSTER_VertexBlood\nMONSTER_VertexBlood:\n.include \"asm/nonmatchings/Game/MONSTER/MONSTER/MONSTER_VertexBlood.s\"\n.set reorder\n.set at\n");
 
 void ProcessBurntMess(Instance *instance, int vertidx, int segidx, int dist, void *cb_data)
 {
