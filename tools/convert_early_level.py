@@ -99,6 +99,37 @@ def cap_geometry(
     }, native_counts
 
 
+def remap_face_material_offsets(
+    face_blob: bytes,
+    template_texture_bytes: int,
+) -> tuple[bytes, int]:
+    """Keep converted TFace texture offsets inside the wrapper texture list.
+
+    TFace.textoff is a byte offset from Terrain.StartTextureList.  Prototype
+    scenes can contain a much larger texture table than the native wrapper;
+    retaining those offsets makes the remaster dereference past the wrapper's
+    serialized texture records during material setup.  Map by texture index so
+    offsets stay aligned to the 12-byte TextureFT3 record size.
+    """
+    if len(face_blob) % 0x0C:
+        raise ValueError("face blob is not aligned to TFace records")
+    texture_count = template_texture_bytes // 0x0C
+    if texture_count <= 0:
+        raise ValueError("template has no serialized texture records")
+    result = bytearray(face_blob)
+    changed = 0
+    for offset in range(0, len(result), 0x0C):
+        textoff = struct.unpack_from("<H", result, offset + 0x0A)[0]
+        if textoff == 0xFFFF:
+            continue
+        texture_index = textoff // 0x0C
+        replacement = (texture_index % texture_count) * 0x0C
+        if replacement != textoff:
+            struct.pack_into("<H", result, offset + 0x0A, replacement)
+            changed += 1
+    return bytes(result), changed
+
+
 def scene_info(path: Path, early: bool) -> dict[str, int | str]:
     data = path.read_bytes()
     module, reloc_count = module_offset(data)
@@ -294,6 +325,7 @@ def convert(
     stream_unit_id: int | None = None,
     copy_early_bsp_graph: bool = False,
     rebalance_bsp: bool = False,
+    sanitize_materials: bool = False,
 ) -> dict[str, object]:
     early = early_path.read_bytes()
     template = bytearray(template_path.read_bytes())
@@ -340,6 +372,15 @@ def convert(
         "faces": checked_span(early, early_module + early_ptrs["faces"], early_counts["faces"], 0x0C, "early face"),
         "normals": checked_span(early, early_module + early_ptrs["normals"], early_counts["normals"], 0x08, "early normal"),
     }
+    remapped_materials = 0
+    if sanitize_materials:
+        native_texture_start = u32(template, template_terrain + 0x34)
+        native_texture_end = u32(template, template_terrain + 0x38)
+        if native_texture_end <= native_texture_start:
+            raise ValueError("template has no valid texture range")
+        arrays["faces"], remapped_materials = remap_face_material_offsets(
+            arrays["faces"], native_texture_end - native_texture_start
+        )
 
     output_counts = dict(early_counts)
     if cap_to_native:
@@ -520,6 +561,7 @@ def convert(
         "patched_early_bsp_leaf_face_pointers": patched_early_faces if early_bsp is not None else 0,
         "world_name": world_name,
         "stream_unit_id": stream_unit_id,
+        "remapped_material_offsets": remapped_materials,
     }
 
 
@@ -555,6 +597,11 @@ def main() -> int:
         action="store_true",
         help="keep the native BSP graph but distribute converted faces and widen its bounds",
     )
+    parser.add_argument(
+        "--sanitize-materials",
+        action="store_true",
+        help="remap prototype TFace texture offsets into the wrapper texture table",
+    )
     args = parser.parse_args()
     for path in (args.early, args.template):
         if not path.is_file():
@@ -570,6 +617,7 @@ def main() -> int:
         stream_unit_id=args.stream_unit_id,
         copy_early_bsp_graph=args.copy_early_bsp,
         rebalance_bsp=args.rebalance_native_bsp,
+        sanitize_materials=args.sanitize_materials,
     )
     print(json.dumps(result, indent=2))
     return 0
