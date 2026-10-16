@@ -21,13 +21,123 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from level_editor import (
-    _append_scene_placements,
-    _module_offset,
-    _parse_drm,
-    _parse_scene_markers,
-    _patch_scene,
-)
+try:  # direct ``python tools/level_viewer.py`` invocation
+    from level_editor import (
+        _append_scene_placements,
+        _module_offset,
+        _parse_drm,
+        _parse_scene_markers,
+        _patch_scene,
+    )
+    from event_extractor import EventReader
+except ModuleNotFoundError:  # imported as ``tools.level_viewer``
+    from tools.level_editor import (
+        _append_scene_placements,
+        _module_offset,
+        _parse_drm,
+        _parse_scene_markers,
+        _patch_scene,
+    )
+    from tools.event_extractor import EventReader
+
+
+def _event_report(path: Path) -> dict[str, object]:
+    """Return the structured event graph used by the event editor."""
+    return EventReader(path).read()
+
+
+def _patch_events(source: Path, payload: dict[str, object], destination: Path) -> int:
+    """Patch fixed-size event fields and existing script words.
+
+    This first writer intentionally does not resize the relocatable module. It
+    can therefore edit existing event numbers, variables, puppet state, and
+    16-bit p-code operands while preserving every pointer and relocation entry.
+    Adding new event lines will use a separate append-and-relocate writer.
+    """
+    report = _event_report(source)
+    events = report.get("events")
+    if not isinstance(events, list):
+        raise ValueError("event report is malformed")
+    event_by_index = {int(event["index"]): event for event in events if isinstance(event, dict)}
+    patches = payload.get("patches")
+    if not isinstance(patches, list):
+        raise ValueError("patches must be an array")
+    data = bytearray(source.read_bytes())
+    module_offset = int(report["module_offset"])
+    changed = 0
+
+    def short_value(value: object, label: str) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or not -32768 <= value <= 32767:
+            raise ValueError(f"{label} must be a signed 16-bit integer")
+        return value
+
+    def byte_value(value: object, label: str) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 255:
+            raise ValueError(f"{label} must be an unsigned byte")
+        return value
+
+    def write_i16(relative: int, value: int) -> None:
+        nonlocal changed
+        absolute = module_offset + relative
+        if absolute < module_offset or absolute + 2 > len(data):
+            raise ValueError("event patch points outside the module")
+        old = struct.unpack_from("<h", data, absolute)[0]
+        if old != value:
+            struct.pack_into("<h", data, absolute, value)
+            changed += 1
+
+    def write_u8(relative: int, value: int) -> None:
+        nonlocal changed
+        absolute = module_offset + relative
+        if absolute < module_offset or absolute >= len(data):
+            raise ValueError("event patch points outside the module")
+        if data[absolute] != value:
+            data[absolute] = value
+            changed += 1
+
+    for patch in patches:
+        if not isinstance(patch, dict):
+            raise ValueError("each event patch must be an object")
+        try:
+            event_index = int(patch["event_index"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("event_index must be an integer") from exc
+        event = event_by_index.get(event_index)
+        if event is None:
+            raise ValueError(f"unknown event index {event_index}")
+        kind = patch.get("kind")
+        event_relative = int(event["relative_offset"])
+        if kind == "event_number":
+            write_i16(event_relative, short_value(patch.get("value"), "event number"))
+        elif kind == "event_variable":
+            variable_index = patch.get("variable_index")
+            if isinstance(variable_index, bool) or not isinstance(variable_index, int) or not 0 <= variable_index < 5:
+                raise ValueError("variable_index must be between 0 and 4")
+            write_i16(event_relative + 6 + variable_index * 2, short_value(patch.get("value"), "event variable"))
+        elif kind == "puppet_state":
+            write_u8(event_relative + 5, byte_value(patch.get("value"), "puppet state"))
+        elif kind == "script_word":
+            action_index = patch.get("action_index")
+            if isinstance(action_index, bool) or not isinstance(action_index, int) or action_index < 0:
+                raise ValueError("action_index must be a non-negative integer")
+            script_name = patch.get("script")
+            if script_name not in {"condition", "action"}:
+                raise ValueError("script must be 'condition' or 'action'")
+            actions = event.get("actions")
+            if not isinstance(actions, list) or action_index >= len(actions):
+                raise ValueError(f"unknown action index {action_index} in event {event_index}")
+            action = actions[action_index]
+            script = action.get(script_name) if isinstance(action, dict) else None
+            if not isinstance(script, dict):
+                raise ValueError("selected event line has no requested script")
+            word_index = patch.get("word_index")
+            if isinstance(word_index, bool) or not isinstance(word_index, int) or not 0 <= word_index < int(script["size_words"]):
+                raise ValueError("word_index is outside the selected script")
+            write_i16(int(script["data_relative_offset"]) + word_index * 2, short_value(patch.get("value"), "script word"))
+        else:
+            raise ValueError(f"unsupported event patch kind: {kind}")
+    destination.write_bytes(data)
+    return changed
 
 
 def _terrain_geometry(path: Path) -> dict[str, object]:
@@ -935,6 +1045,12 @@ class ViewerHandler(BaseHTTPRequestHandler):
                     raise ValueError("missing DRM/PCM path")
                 self._json(HTTPStatus.OK, _geometry(_safe_asset(self.root, requested)))
                 return
+            if parsed.path == "/api/events":
+                requested = parse_qs(parsed.query).get("path", [self.default_asset])[0]
+                if not requested:
+                    raise ValueError("missing DRM/PCM path")
+                self._json(HTTPStatus.OK, _event_report(_safe_asset(self.root, requested)))
+                return
             if parsed.path == "/api/object-list":
                 if self.object_root is None:
                     self._json(HTTPStatus.OK, [])
@@ -1040,7 +1156,7 @@ class ViewerHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
         parsed = urlparse(self.path)
         try:
-            if parsed.path not in {"/api/apply-markers", "/api/apply-placements"}:
+            if parsed.path not in {"/api/apply-markers", "/api/apply-placements", "/api/apply-events"}:
                 self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"not found\n")
                 return
             if self.write_root is None:
@@ -1052,29 +1168,33 @@ class ViewerHandler(BaseHTTPRequestHandler):
             if not isinstance(requested, str) or not requested:
                 raise ValueError("path must be a non-empty string")
             source = _safe_asset(self.root, requested)
-            source_geometry = _geometry(source)
-            if source_geometry.get("asset_type") not in {"drm", "pcm-level"}:
-                raise ValueError("direct writes are limited to DRM/PCM scene assets")
             target = _safe_target(self.write_root, requested)
             before_sha1 = _sha1(target)
             with tempfile.TemporaryDirectory(prefix="soul-re-viewer-") as temp_dir:
                 temp_dir_path = Path(temp_dir)
                 patched_path = temp_dir_path / target.name
-                if parsed.path == "/api/apply-markers":
-                    markers = payload.get("markers")
-                    if not isinstance(markers, list):
-                        raise ValueError("markers must be an array")
-                    scene_path = temp_dir_path / "scene.json"
-                    scene_payload = {"format": "soul-re-scene-v1", "source": requested, "markers": markers}
-                    scene_path.write_text(json.dumps(scene_payload), encoding="utf-8")
-                    changed = _patch_scene(source, scene_path, patched_path)
+                if parsed.path == "/api/apply-events":
+                    changed = _patch_events(source, payload, patched_path)
                     added = []
                 else:
-                    placements = payload.get("placements")
-                    if not isinstance(placements, list):
-                        raise ValueError("placements must be an array")
-                    added = _append_scene_placements(source, placements, patched_path)
-                    changed = len(added)
+                    source_geometry = _geometry(source)
+                    if source_geometry.get("asset_type") not in {"drm", "pcm-level"}:
+                        raise ValueError("direct writes are limited to DRM/PCM scene assets")
+                    if parsed.path == "/api/apply-markers":
+                        markers = payload.get("markers")
+                        if not isinstance(markers, list):
+                            raise ValueError("markers must be an array")
+                        scene_path = temp_dir_path / "scene.json"
+                        scene_payload = {"format": "soul-re-scene-v1", "source": requested, "markers": markers}
+                        scene_path.write_text(json.dumps(scene_payload), encoding="utf-8")
+                        changed = _patch_scene(source, scene_path, patched_path)
+                        added = []
+                    else:
+                        placements = payload.get("placements")
+                        if not isinstance(placements, list):
+                            raise ValueError("placements must be an array")
+                        added = _append_scene_placements(source, placements, patched_path)
+                        changed = len(added)
                 after_sha1 = _sha1(patched_path)
                 if before_sha1 == after_sha1:
                     self._json(HTTPStatus.OK, {"path": requested, "changed": 0, "added": added, "written": False, "sha1": before_sha1})

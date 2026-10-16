@@ -41,6 +41,12 @@
     #hud { position: absolute; left: 16px; right: 16px; top: 14px; display: flex; justify-content: space-between; pointer-events: none; color: var(--muted); text-shadow: 0 1px 2px #000; }
     #status { color: var(--accent); }
     .help { font-size: 12px; }
+    .event-box { border: 1px solid var(--line); border-radius: 5px; padding: 8px; background: rgba(24,34,53,.55); }
+    .event-box label { margin-top: 7px; }
+    .event-token { display: grid; grid-template-columns: 42px 1fr 74px; gap: 5px; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 11px; }
+    .event-token:last-child { border-bottom: 0; }
+    .event-token small { color: var(--muted); }
+    #eventTokens { max-height: 210px; overflow: auto; margin-top: 6px; }
     input[type=checkbox] { accent-color: #38bdf8; }
     .check { display: flex; align-items: center; gap: 7px; margin: 11px 0; color: var(--muted); }
     #texturePreview { display: block; width: 100%; max-height: 180px; object-fit: contain; image-rendering: auto; background: #080d16; border: 1px solid var(--line); border-radius: 5px; }
@@ -61,6 +67,24 @@
     <h2>Display</h2>
     <label class="check"><input id="wire" type="checkbox"> wireframe overlay</label>
     <label class="check"><input id="markersToggle" type="checkbox" checked> scene markers</label>
+    <h2>Events</h2>
+    <div class="event-box">
+      <button id="loadEvents">Load events</button>
+      <label for="eventSelect">event</label>
+      <select id="eventSelect" disabled><option value="">Load events first</option></select>
+      <div id="eventEditor" hidden>
+        <label for="eventNumber">event number</label>
+        <input id="eventNumber" type="number" step="1">
+        <label>event variables</label>
+        <div class="coord-grid"><input id="eventVar0" type="number" step="1"><input id="eventVar1" type="number" step="1"><input id="eventVar2" type="number" step="1"><input id="eventVar3" type="number" step="1"><input id="eventVar4" type="number" step="1"></div>
+        <label for="eventAction">action line</label>
+        <select id="eventAction"></select>
+        <div id="eventMeaning" class="help" style="margin-top:7px"></div>
+        <div id="eventTokens"></div>
+        <button id="applyEvents" style="margin-top:8px" disabled>Apply event edits</button>
+      </div>
+      <div id="eventStatus" class="help" style="margin-top:7px">Events are loaded from the selected area PCM/DRM.</div>
+    </div>
     <h2>Placements</h2>
     <label for="objectType">object type</label>
     <select id="objectType"><option value="object">object</option><option value="spawn">spawn point</option><option value="trigger">trigger</option><option value="light">light</option></select>
@@ -157,6 +181,16 @@ const applyMarkersEl = document.getElementById("applyMarkers");
 const applyPlacementsEl = document.getElementById("applyPlacements");
 const writeStatusEl = document.getElementById("writeStatus");
 const exportSceneEl = document.getElementById("exportScene");
+const loadEventsEl = document.getElementById("loadEvents");
+const eventSelectEl = document.getElementById("eventSelect");
+const eventEditorEl = document.getElementById("eventEditor");
+const eventNumberEl = document.getElementById("eventNumber");
+const eventVarEls = [0,1,2,3,4].map(i=>document.getElementById(`eventVar${i}`));
+const eventActionEl = document.getElementById("eventAction");
+const eventMeaningEl = document.getElementById("eventMeaning");
+const eventTokensEl = document.getElementById("eventTokens");
+const applyEventsEl = document.getElementById("applyEvents");
+const eventStatusEl = document.getElementById("eventStatus");
 if (!gl) { statusEl.textContent = "WebGL unavailable"; throw new Error("WebGL unavailable"); }
 
 const vertexSource = `
@@ -227,6 +261,9 @@ let lastAnimationFrame = -1;
 let sraAnimation = null;
 let sraPlaying = false;
 let sraFrame = -1;
+let eventReport = null;
+let selectedEventIndex = -1;
+let selectedEventAction = 0;
 
 function mat4Multiply(a, b) {
   const o = new Float32Array(16);
@@ -489,9 +526,42 @@ function updateAssetControls() {
   exportSceneEl.disabled = !model;
   applyMarkersEl.disabled = !directWritesEnabled || !isScene;
   applyPlacementsEl.disabled = !directWritesEnabled || !isScene || !placements.length || placements.some(p=>p.kind!=="object");
+  applyEventsEl.disabled = !directWritesEnabled || !eventReport || selectedEventIndex < 0;
   if (model && !isScene) writeStatusEl.textContent = "PCM object loaded. Direct marker writes apply to scene assets only.";
 }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+function selectedEvent() { return eventReport?.events?.find(e=>Number(e.index)===selectedEventIndex)||null; }
+function renderEventEditor() {
+  const event=selectedEvent();
+  if(!event){eventEditorEl.hidden=true;applyEventsEl.disabled=true;return;}
+  eventEditorEl.hidden=false; eventNumberEl.value=event.event_number;
+  (event.event_variables||[]).forEach((v,i)=>{eventVarEls[i].value=v;});
+  const actions=event.actions||[];
+  if(selectedEventAction>=actions.length) selectedEventAction=Math.max(0,actions.length-1);
+  eventActionEl.innerHTML=actions.length?actions.map(a=>`<option value="${a.index}">line ${a.index} — ${escapeHtml((a.semantic_flags||[]).join(", ")||"no labels")}</option>`).join(""):"<option value=\"0\">no action lines</option>";
+  eventActionEl.value=String(selectedEventAction);
+  const action=actions[selectedEventAction];
+  if(!action){eventMeaningEl.textContent="This event has no editable action line.";eventTokensEl.innerHTML="";updateAssetControls();return;}
+  eventMeaningEl.textContent=`${action.human_summary||""} ${action.condition?"A condition script is present; it is shown in the report but this first editor does not rewrite conditions yet.":""}`;
+  const tokens=action.action?.tokens||[];
+  const editable=tokens.filter(t=>t.opcode==="push_number"||t.opcode==="push_object");
+  eventTokensEl.innerHTML=editable.length?`<div class="help">Editable p-code operands. Voice IDs are the number after ATTR_VOICEPLAY; object indices select an existing event object.</div>`+editable.map(t=>{
+    const attrs=tokens.filter(x=>Number(x.word_index)<Number(t.word_index)&&x.opcode==="modify_attribute");
+    const currentAttribute=attrs.length?attrs[attrs.length-1].attribute||"":"";
+    const label=currentAttribute?`${t.opcode} → ${currentAttribute}`:t.opcode;
+    return `<div class="event-token"><small>w${Number(t.word_index)+1}</small><span>${escapeHtml(label)}</span><input class="event-edit-value" data-word-index="${Number(t.word_index)+1}" data-script="action" type="number" step="1" value="${t.operand}"></div>`;
+  }).join(""):"<div class=\"help\">No editable numeric operands in this action.</div>";
+  updateAssetControls();
+}
+async function loadEventReport(path) {
+  eventReport=null; selectedEventIndex=-1; selectedEventAction=0; eventSelectEl.disabled=true; eventEditorEl.hidden=true; eventStatusEl.textContent="Loading events…"; updateAssetControls();
+  try {
+    const report=await fetchJson(`/api/events?path=${encodeURIComponent(path)}`);
+    eventReport=report; const events=report.events||[];
+    eventSelectEl.innerHTML=events.length?events.map(e=>`<option value="${e.index}">#${e.index} event ${e.event_number} — ${escapeHtml(e.mode)}</option>`).join(""):"<option value=\"\">No events</option>";
+    eventSelectEl.disabled=!events.length; selectedEventIndex=events.length?Number(events[0].index):-1; eventStatusEl.textContent=events.length?`${events.length} event definitions loaded. Changes are fixed-size only for now.`:"This asset contains no puzzle/event table."; renderEventEditor();
+  } catch(e) { eventStatusEl.textContent=`Event load failed: ${e.message}`; }
+}
 function drawMainGeometry() {
   for (const group of textureGroups) {
     if (!group.texture) continue;
@@ -524,7 +594,7 @@ function render() {
   requestAnimationFrame(render);
 }
 async function fetchJson(url) { const r=await fetch(url); if (!r.ok) throw new Error(await r.text()); return await r.json(); }
-async function loadPath(path) { statusEl.textContent="Loading…"; try { loadModel(await fetchJson(`/api/asset?path=${encodeURIComponent(path)}`)); history.replaceState(null,"",`?asset=${encodeURIComponent(path)}`); } catch(e) { statusEl.textContent="Error"; markersEl.innerHTML=`<div class="marker">${escapeHtml(e.message)}</div>`; } }
+async function loadPath(path) { statusEl.textContent="Loading…"; try { loadModel(await fetchJson(`/api/asset?path=${encodeURIComponent(path)}`)); history.replaceState(null,"",`?asset=${encodeURIComponent(path)}`); await loadEventReport(path); } catch(e) { statusEl.textContent="Error"; markersEl.innerHTML=`<div class="marker">${escapeHtml(e.message)}</div>`; } }
 async function refreshWriteStatus() { try { const info=await fetchJson("/api/write-status"); directWritesEnabled=!!info.enabled; updateAssetControls(); writeStatusEl.textContent=directWritesEnabled?`Direct writes enabled: ${info.root}`:"Direct writes disabled. Restart with --write-root to enable."; } catch(e) { directWritesEnabled=false; updateAssetControls(); writeStatusEl.textContent="Direct write status unavailable."; } }
 async function init() { try { await refreshWriteStatus(); const [objectList,animationList,sraList]=await Promise.all([fetchJson("/api/object-list"),fetchJson("/api/animation-list"),fetchJson("/api/sra-list")]); objectListCache=objectList; objectAssetEl.innerHTML=`<option value="">placement marker only</option>`+objectList.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); animationAssetEl.innerHTML=`<option value="">no animation</option>`+animationList.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); sraAssetEl.innerHTML=`<option value="">choose an SRA archive</option>`+sraList.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); const preferred=sraList.find(p=>p.toLowerCase()==="morboss.sra"); if(preferred){sraAssetEl.value=preferred; await loadSraArchive(preferred);} const list=await fetchJson("/api/list"); assetSelect.innerHTML=list.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); const params=new URLSearchParams(location.search); const wanted=params.get("asset")||params.get("drm"); const initial=wanted && list.includes(wanted) ? wanted : (list.includes("city/bin/city2.drm") ? "city/bin/city2.drm" : list[0]); if(initial && !preferred){ assetSelect.value=initial; await loadPath(initial); } } catch(e) { statusEl.textContent="Error"; markersEl.innerHTML=`<div class="marker">${escapeHtml(e.message)}</div>`; } }
 function normalize(v) { const l=Math.hypot(v[0],v[1],v[2])||1; return [v[0]/l,v[1]/l,v[2]/l]; }
@@ -556,6 +626,23 @@ animationSpeedEl.addEventListener("input",()=>{animationSpeedValueEl.textContent
 sraAssetEl.addEventListener("change",()=>void loadSraArchive(sraAssetEl.value));
 sraClipEl.addEventListener("change",selectSraClip);
 sraPlayEl.addEventListener("click",()=>{if(!sraAnimation)return;sraPlaying=!sraPlaying;sraPlayEl.textContent=sraPlaying?"Pause SRA clip":"Play SRA clip";sraPlayEl.title=sraPlaying?"Pause SRA playback":"Start SRA playback";if(sraPlaying){animationClock=0;sraFrame=-1;}});
+loadEventsEl.addEventListener("click",()=>{if(assetSelect.value)void loadEventReport(assetSelect.value);});
+eventSelectEl.addEventListener("change",()=>{selectedEventIndex=Number(eventSelectEl.value);selectedEventAction=0;renderEventEditor();});
+eventActionEl.addEventListener("change",()=>{selectedEventAction=Number(eventActionEl.value);renderEventEditor();});
+applyEventsEl.addEventListener("click",async()=>{
+  const event=selectedEvent(); if(!directWritesEnabled||!event)return;
+  const patches=[{kind:"event_number",event_index:event.index,value:Number(eventNumberEl.value)}];
+  eventVarEls.forEach((el,i)=>patches.push({kind:"event_variable",event_index:event.index,variable_index:i,value:Number(el.value)}));
+  eventTokensEl.querySelectorAll(".event-edit-value").forEach(input=>{
+    const original=(event.actions?.[selectedEventAction]?.action?.tokens||[]).find(t=>Number(t.word_index)+1===Number(input.dataset.wordIndex));
+    const value=Number(input.value);
+    if(original&&Number.isInteger(value)&&value!==Number(original.operand)) patches.push({kind:"script_word",event_index:event.index,action_index:selectedEventAction,script:input.dataset.script,word_index:Number(input.dataset.wordIndex),value});
+  });
+  if(!patches.every(p=>Number.isInteger(p.value))){eventStatusEl.textContent="Every event value must be an integer.";return;}
+  if(!window.confirm(`Write edits to ${assetSelect.value}? A timestamped backup will be created first.`))return;
+  applyEventsEl.disabled=true; eventStatusEl.textContent="Writing event backup and validating the patched graph…";
+  try { const response=await fetch("/api/apply-events",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:assetSelect.value,patches})}); const result=await response.json(); if(!response.ok)throw new Error(result.error||"event write failed"); eventStatusEl.textContent=result.written?`Applied ${result.changed} event field${result.changed===1?"":"s"}. Backup: ${result.backup}`:"No event changes to write."; await loadPath(assetSelect.value); } catch(e) { eventStatusEl.textContent=`Event write failed: ${e.message}`; } finally { updateAssetControls(); }
+});
 [markerXEl,markerYEl,markerZEl].forEach(el=>el.addEventListener("input",writeMarkerFromForm));
 exportSceneEl.addEventListener("click",()=>{if(!model)return;const blob=new Blob([JSON.stringify({format:"soul-re-scene-v1",source:model.path,summary:model.summary,markers:model.markers},null,2)+"\n"],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${(model.summary.world_name||model.asset_type||"asset")}-scene.json`;a.click();URL.revokeObjectURL(a.href);});
 applyMarkersEl.addEventListener("click",async()=>{if(!directWritesEnabled||!model)return;if(!window.confirm(`Write marker changes directly to ${assetSelect.value}? A timestamped backup will be created first.`))return;applyMarkersEl.disabled=true;writeStatusEl.textContent="Writing backup and patched DRM…";try{const response=await fetch("/api/apply-markers",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:assetSelect.value,markers:model.markers})});const result=await response.json();if(!response.ok)throw new Error(result.error||"direct write failed");writeStatusEl.textContent=result.written?`Applied. Backup: ${result.backup}`:"No changes to write.";await loadPath(assetSelect.value);}catch(e){writeStatusEl.textContent=`Write failed: ${e.message}`;}finally{applyMarkersEl.disabled=!directWritesEnabled;}});
