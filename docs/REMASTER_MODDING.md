@@ -129,14 +129,14 @@ unrelated executable changes.
 
 ## Importing an early-build level
 
-The July 14, 1999 prototype in `D:\\2 16` uses an alternate BIGFILE index, but
+The July 14, 1999 prototype in `D:\2 16` uses an alternate BIGFILE index, but
 the disc's `CATDATA` still gives us the stored offset for every file.  The
 extractor reads `CATDATA` from the sibling file or directly from the PSX image,
 then copies the catalog span without changing the source archive:
 
 ```powershell
 python tools/extract_early_bigfile.py `
-  --source 'D:\\2 16' `
+  --source 'D:\2 16' `
   --output build/early-mrlock6 `
   --select '*mrlock6.drm' `
   --pcm
