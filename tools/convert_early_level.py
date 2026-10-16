@@ -52,6 +52,53 @@ def checked_span(data: bytes, absolute: int, count: int, item_size: int, label: 
     return data[absolute:end]
 
 
+def cap_geometry(
+    early_arrays: dict[str, bytes],
+    early_counts: dict[str, int],
+    template: bytes,
+    template_module: int,
+    template_terrain: int,
+) -> tuple[dict[str, bytes], dict[str, int]]:
+    """Keep early geometry coherent while respecting native array capacities."""
+    native_counts = {
+        "vertices": i32(template, template_terrain + 0x10),
+        "faces": i32(template, template_terrain + 0x14),
+        "normals": i32(template, template_terrain + 0x18),
+    }
+    native_vertex_rel = u32(template, template_terrain + 0x1C)
+    native_normal_rel = u32(template, template_terrain + 0x24)
+    native_vertices = checked_span(
+        template, template_module + native_vertex_rel, native_counts["vertices"], 0x0C, "template vertex"
+    )
+    native_normals = checked_span(
+        template, template_module + native_normal_rel, native_counts["normals"], 0x08, "template normal"
+    )
+
+    # Preserve the prototype's triangle-to-vertex relationship.  Discard only
+    # triangles that reference vertices above the native capacity, then repeat
+    # valid triangles if the native face budget is larger than the survivors.
+    valid_faces: list[bytes] = []
+    face_blob = early_arrays["faces"]
+    for index in range(early_counts["faces"]):
+        record = face_blob[index * 0x0C : (index + 1) * 0x0C]
+        v0, v1, v2 = struct.unpack_from("<HHH", record)
+        if v0 < native_counts["vertices"] and v1 < native_counts["vertices"] and v2 < native_counts["vertices"]:
+            valid_faces.append(record)
+    if not valid_faces:
+        raise ValueError("early scene has no faces within native vertex capacity")
+    selected_faces = (valid_faces * ((native_counts["faces"] + len(valid_faces) - 1) // len(valid_faces)))[: native_counts["faces"]]
+
+    vertex_bytes = bytearray(native_vertices)
+    vertex_bytes[: min(len(vertex_bytes), len(early_arrays["vertices"]))] = early_arrays["vertices"][: len(vertex_bytes)]
+    normal_bytes = bytearray(native_normals)
+    normal_bytes[: min(len(normal_bytes), len(early_arrays["normals"]))] = early_arrays["normals"][: len(normal_bytes)]
+    return {
+        "vertices": bytes(vertex_bytes),
+        "faces": b"".join(selected_faces),
+        "normals": bytes(normal_bytes),
+    }, native_counts
+
+
 def scene_info(path: Path, early: bool) -> dict[str, int | str]:
     data = path.read_bytes()
     module, reloc_count = module_offset(data)
@@ -86,6 +133,7 @@ def convert(
     template_path: Path,
     output_path: Path,
     preserve_template_topology: bool = False,
+    cap_to_native: bool = False,
 ) -> dict[str, object]:
     early = early_path.read_bytes()
     template = bytearray(template_path.read_bytes())
@@ -119,6 +167,10 @@ def convert(
     }
 
     output_counts = dict(early_counts)
+    if cap_to_native:
+        arrays, output_counts = cap_geometry(
+            arrays, early_counts, template, template_module, template_terrain
+        )
     if preserve_template_topology:
         # Keep the remaster's fixed face/normal topology and BSP partitioning.
         # Only replace the first native vertex-count positions with prototype
@@ -231,6 +283,11 @@ def main() -> int:
         action="store_true",
         help="keep native face/normal counts and BSP topology; replace vertex positions only",
     )
+    parser.add_argument(
+        "--cap-to-native",
+        action="store_true",
+        help="keep prototype triangle relationships while capping arrays to native remaster counts",
+    )
     args = parser.parse_args()
     for path in (args.early, args.template):
         if not path.is_file():
@@ -240,6 +297,7 @@ def main() -> int:
         args.template,
         args.output,
         preserve_template_topology=args.preserve_template_topology,
+        cap_to_native=args.cap_to_native,
     )
     print(json.dumps(result, indent=2))
     return 0
