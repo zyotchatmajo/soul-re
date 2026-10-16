@@ -125,6 +125,37 @@ def convert(early_path: Path, template_path: Path, output_path: Path) -> dict[st
         appended[name] = rel
         template.extend(arrays[name])
 
+    # The native BSP leaves contain their own face-list pointers.  Redirect
+    # those pointers when they point into the wrapper's original face array;
+    # otherwise collision/render traversal would still index the discarded
+    # native faces while Terrain.faceList points at the prototype faces.
+    old_face_rel = u32(template, template_terrain + 0x20)
+    old_face_count = i32(template, template_terrain + 0x14)
+    bsp_count = i32(template, template_terrain + 0x44)
+    bsp_array_rel = u32(template, template_terrain + 0x48)
+    patched_leaf_faces = 0
+    if bsp_count >= 0 and bsp_count < 0x10000 and bsp_array_rel:
+        old_face_end = old_face_rel + old_face_count * 0x0C
+        for tree_index in range(bsp_count):
+            tree = template_module + bsp_array_rel + tree_index * 0x24
+            if tree + 0x0C > len(template):
+                break
+            start_leaves = u32(template, tree + 0x04)
+            end_leaves = u32(template, tree + 0x08)
+            if not (start_leaves <= end_leaves and end_leaves - start_leaves <= 0x100000):
+                continue
+            leaf_rel = start_leaves
+            while leaf_rel < end_leaves:
+                leaf = template_module + leaf_rel
+                if leaf + 0x0E > len(template):
+                    break
+                face_rel = u32(template, leaf + 0x08)
+                if old_face_rel <= face_rel < old_face_end:
+                    delta = face_rel - old_face_rel
+                    struct.pack_into("<I", template, leaf + 0x08, appended["faces"] + delta)
+                    patched_leaf_faces += 1
+                leaf_rel += 0x30
+
     # Native remaster Terrain fields: counts at 0x10/0x14/0x18 and pointers at
     # 0x1c/0x20/0x24.  Keep its BSP/texture/event structures coherent with the
     # wrapper; the geometry arrays are the only transplanted data in this pass.
@@ -148,6 +179,7 @@ def convert(early_path: Path, template_path: Path, output_path: Path) -> dict[st
         "counts": early_counts,
         "appended_relative": appended,
         "output_size": len(template),
+        "patched_bsp_leaf_face_pointers": patched_leaf_faces,
         "mode": "geometry-wrapper",
     }
 
