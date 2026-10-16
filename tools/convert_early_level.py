@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import struct
 from pathlib import Path
 
@@ -196,6 +197,43 @@ def remap_native_vertex_positions(native_vertices: bytes, early_vertices: bytes)
                 )
         struct.pack_into("<hhh", result, offset, *match)
     return bytes(result)
+
+
+def copy_early_stream_portals(
+    template: bytearray,
+    early: bytes,
+    early_module: int,
+    early_terrain: int,
+    template_module: int,
+    template_terrain: int,
+) -> tuple[int, int]:
+    """Append the prototype portal table and retarget Terrain.StreamUnits."""
+    early_relative = u32(early, early_terrain + 0x30)
+    early_absolute = early_module + early_relative
+    count = i32(early, early_absolute)
+    if count < 0 or count > 0x1000:
+        raise ValueError("prototype stream portal count is invalid")
+    block_size = 4 + count * 0x5C
+    if early_absolute + block_size > len(early):
+        raise ValueError("prototype stream portal table extends outside scene")
+    block = bytearray(early[early_absolute : early_absolute + block_size])
+    for index in range(count):
+        record = 4 + index * 0x5C
+        # Runtime fills this pointer when the destination stream is connected;
+        # serialized prototype pointers are not valid in the remaster module.
+        struct.pack_into("<I", block, record + 0x28, 0)
+        name = bytes(block[record : record + 16]).split(b"\0", 1)[0].decode("ascii", "ignore")
+        match = re.match(r"^city(\d+),", name, re.IGNORECASE)
+        if match:
+            struct.pack_into("<i", block, record + 0x14, 3404 + int(match.group(1)))
+
+    relative = align(len(template) - template_module, 4)
+    absolute = template_module + relative
+    if len(template) < absolute:
+        template.extend(b"\0" * (absolute - len(template)))
+    template.extend(block)
+    struct.pack_into("<I", template, template_terrain + 0x30, relative)
+    return relative, count
 
 
 def scene_info(path: Path, early: bool) -> dict[str, int | str]:
@@ -395,6 +433,7 @@ def convert(
     rebalance_bsp: bool = False,
     sanitize_materials: bool = False,
     match_native_vertices: bool = False,
+    copy_stream_portals: bool = False,
 ) -> dict[str, object]:
     early = early_path.read_bytes()
     template = bytearray(template_path.read_bytes())
@@ -529,6 +568,12 @@ def convert(
             "output_size": len(template),
         }
 
+    copied_stream_portals = 0
+    if copy_stream_portals:
+        _, copied_stream_portals = copy_early_stream_portals(
+            template, early, early_module, early_terrain, template_module, template_terrain
+        )
+
     # Append aligned arrays to the existing native module.  The wrapper's
     # relocation entries already include the three native Terrain pointer
     # fields that we update below.
@@ -659,6 +704,7 @@ def convert(
         "remapped_material_offsets": remapped_materials,
         "resized_morph_data": resized_morph_data,
         "matched_native_vertices": match_native_vertices,
+        "copied_stream_portals": copied_stream_portals,
     }
 
 
@@ -704,6 +750,11 @@ def main() -> int:
         action="store_true",
         help="map each native vertex position to its nearest prototype position",
     )
+    parser.add_argument(
+        "--copy-stream-portals",
+        action="store_true",
+        help="replace the native portal table with the prototype table and remap city stream IDs",
+    )
     args = parser.parse_args()
     for path in (args.early, args.template):
         if not path.is_file():
@@ -721,6 +772,7 @@ def main() -> int:
         rebalance_bsp=args.rebalance_native_bsp,
         sanitize_materials=args.sanitize_materials,
         match_native_vertices=args.match_native_vertices,
+        copy_stream_portals=args.copy_stream_portals,
     )
     print(json.dumps(result, indent=2))
     return 0
