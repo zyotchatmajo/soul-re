@@ -77,8 +77,8 @@
     <select id="sraAsset"><option value="">choose an SRA archive</option></select>
     <label for="sraClip">SRA clip</label>
     <select id="sraClip" disabled><option value="">select an archive first</option></select>
-    <button id="sraPlay" style="margin-top:8px" disabled title="The remaster SRA channel decoder is not available yet">Play SRA clip (decoder pending)</button>
-    <div id="sraInfo" class="help">SRA clips are catalogued here; compressed G2 playback is not enabled yet.</div>
+    <button id="sraPlay" style="margin-top:8px" disabled title="Choose an SRA clip first">Play SRA clip</button>
+    <div id="sraInfo" class="help">Choose an SRA clip to decode its compressed G2 channels and preview playback.</div>
     <label>diffuse texture preview</label>
     <img id="texturePreview" alt="No diffuse texture loaded" hidden>
     <label for="objectName">name</label>
@@ -224,6 +224,9 @@ let dragMoved = false;
 let animationClock = 0;
 let lastAnimationTimestamp = performance.now();
 let lastAnimationFrame = -1;
+let sraAnimation = null;
+let sraPlaying = false;
+let sraFrame = -1;
 
 function mat4Multiply(a, b) {
   const o = new Float32Array(16);
@@ -350,7 +353,9 @@ async function loadSraArchive(path) {
   if (!path) {
     sraClipEl.disabled=true;
     sraClipEl.innerHTML='<option value="">select an archive first</option>';
-    sraInfoEl.textContent="SRA clips are catalogued here; compressed G2 playback is not enabled yet.";
+    sraPlayEl.disabled=true; sraPlaying=false; sraAnimation=null; sraFrame=-1;
+    sraPlayEl.textContent="Play SRA clip"; sraPlayEl.title="Choose an SRA clip first";
+    sraInfoEl.textContent="Choose an SRA clip to decode its compressed G2 channels and preview playback.";
     return;
   }
   try {
@@ -360,7 +365,8 @@ async function loadSraArchive(path) {
     sraClipEl.innerHTML=catalog.clips.map(clip=>`<option value="${clip.index}">clip ${clip.index} — ${clip.key_count} keys / ${(clip.duration_ms/1000).toFixed(2)} s</option>`).join("");
     if (catalog.clips.length) sraClipEl.value="0";
     const match=matchingSrmForSra(path);
-    sraInfoEl.textContent=`${catalog.summary.animation_count} embedded clips in ${path}; ${match ? `matching model: ${match}` : "no matching SRM found"}. Select a clip to inspect its timing.`;
+    sraPlayEl.disabled=true; sraPlaying=false; sraAnimation=null; sraFrame=-1; sraPlayEl.textContent="Play SRA clip"; sraPlayEl.title="Choose an SRA clip first";
+    sraInfoEl.textContent=`${catalog.summary.animation_count} embedded clips in ${path}; ${match ? `matching model: ${match}` : "no matching SRM found"}. Select a clip to decode.`;
     if (match) {
       statusEl.textContent=`Loading ${match}…`;
       loadModel(await fetchJson(`/api/object?path=${encodeURIComponent(match)}`));
@@ -376,7 +382,21 @@ async function loadSraArchive(path) {
 function selectSraClip() {
   const path=sraAssetEl.value, catalog=sraCatalogs.get(path), clip=catalog?.clips?.[Number(sraClipEl.value)];
   if (!clip) return;
-  sraInfoEl.textContent=`${path} · clip ${clip.index} · ${clip.key_count} keys · ${(clip.duration_ms/1000).toFixed(2)} s · ${clip.section_count} section${clip.section_count===1?"":"s"}. Playback requires decoding the original G2 channel stream; SRL playback remains available below.`;
+  sraPlayEl.disabled=true; sraPlaying=false; sraAnimation=null; sraFrame=-1; sraPlayEl.textContent="Decoding SRA…"; sraPlayEl.title="Decoding compressed SRA channels";
+  sraInfoEl.textContent=`${path} · clip ${clip.index} · decoding ${clip.key_count} keys…`;
+  void (async()=>{
+    try {
+      const segments=Number(model?.summary?.bone_count||32);
+      const decoded=await fetchJson(`/api/sra-frames?path=${encodeURIComponent(path)}&clip=${clip.index}&segments=${segments}`);
+      if (sraAssetEl.value!==path || Number(sraClipEl.value)!==clip.index) return;
+      sraAnimation=decoded; sraFrame=0; sraPlaying=false; sraPlayEl.disabled=false; sraPlayEl.textContent="Play SRA clip"; sraPlayEl.title="Start SRA playback";
+      rebuildMainGeometryFrame(0);
+      const warning=decoded.summary.warning ? ` · ${decoded.summary.warning}` : "";
+      sraInfoEl.textContent=`${path} · clip ${clip.index} · ${decoded.summary.frame_count} frames · ${(decoded.summary.duration_ms/1000).toFixed(2)} s · ${decoded.summary.decoded_channel_count} channels decoded${warning}`;
+    } catch(e) {
+      sraPlayEl.disabled=true; sraPlayEl.textContent="Play SRA clip"; sraPlayEl.title="SRA decode failed"; sraInfoEl.textContent=`SRA decode failed: ${e.message}`; statusEl.textContent="SRA decode error";
+    }
+  })();
 }
 async function loadModelTextures(data, activeModel) {
   const groups=textureGroups.slice();
@@ -414,8 +434,19 @@ function renderMarkerList() {
 }
 function selectMarker(index) { selectedMarker=index; const m=model?.markers?.[index]; if(m){markerXEl.value=m.x;markerYEl.value=m.y;markerZEl.value=m.z;} renderMarkerList(); }
 function writeMarkerFromForm() { if(selectedMarker<0||!model?.markers?.[selectedMarker])return;const x=Number(markerXEl.value),y=Number(markerYEl.value),z=Number(markerZEl.value);if(![x,y,z].every(Number.isInteger)||![x,y,z].every(v=>v>=-32768&&v<=32767))return;Object.assign(model.markers[selectedMarker],{x,y,z});rebuildMarkerBuffers();renderMarkerList(); }
+function rebuildMainGeometryFrame(frameIndex) {
+  if (!model || !geometryBuffer || !sraAnimation) return;
+  const frameCount=Number(sraAnimation.summary?.frame_count||sraAnimation.frames?.length||0);
+  if (!frameCount) return;
+  const safeFrame=((frameIndex%frameCount)+frameCount)%frameCount, positions=[];
+  for (let vertexIndex=0;vertexIndex<model.vertices.length;vertexIndex++) {
+    const v=skinnedVertex(model,vertexIndex,sraAnimation,safeFrame);
+    positions.push((v[0]-model.center[0])/model.scale,(v[2]-model.center[2])/model.scale,(v[1]-model.center[1])/model.scale);
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER,geometryBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(positions),gl.DYNAMIC_DRAW); sraFrame=safeFrame;
+}
 function loadModel(data) {
-  clearBuffers(); model=data; animationClock=0; lastAnimationFrame=-1;
+  clearBuffers(); model=data; animationClock=0; lastAnimationFrame=-1; sraAnimation=null; sraPlaying=false; sraFrame=-1; sraPlayEl.disabled=true; sraPlayEl.textContent="Play SRA clip";
   const s=data.summary, min=s.bounds_min, max=s.bounds_max;
   const cx=(min[0]+max[0])/2, cy=(min[1]+max[1])/2, cz=(min[2]+max[2])/2;
   const scale=Math.max(max[0]-min[0],max[1]-min[1],max[2]-min[2],1)/2;
@@ -480,6 +511,11 @@ function render() {
     const frame=Math.floor(animationClock*Number(animationSpeedEl.value||1));
     if (frame!==lastAnimationFrame) { lastAnimationFrame=frame; rebuildPlacementBuffers(); }
   }
+  if (sraPlaying && sraAnimation?.frames?.length) {
+    animationClock += delta*1000/Math.max(1,Number(sraAnimation.summary?.time_per_key||100));
+    const frame=Math.floor(animationClock)%sraAnimation.frames.length;
+    if (frame!==sraFrame) rebuildMainGeometryFrame(frame);
+  }
   resize(); gl.enable(gl.DEPTH_TEST); gl.clearColor(.025,.045,.08,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT); if (!model) { requestAnimationFrame(render); return; }
   gl.useProgram(program); gl.uniformMatrix4fv(matrixLoc,false,matrix()); drawMainGeometry();
   if (wireToggle.checked) { gl.disable(gl.DEPTH_TEST); gl.lineWidth(1); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.drawElements(gl.LINE_STRIP,indexCount,gl.UNSIGNED_SHORT,0); gl.enable(gl.DEPTH_TEST); }
@@ -520,6 +556,7 @@ animationToggleEl.addEventListener("click",()=>{animationPlayingEl.checked=!anim
 animationSpeedEl.addEventListener("input",()=>{animationSpeedValueEl.textContent=`${Number(animationSpeedEl.value).toFixed(1)}×`;lastAnimationFrame=-1;});
 sraAssetEl.addEventListener("change",()=>void loadSraArchive(sraAssetEl.value));
 sraClipEl.addEventListener("change",selectSraClip);
+sraPlayEl.addEventListener("click",()=>{if(!sraAnimation)return;sraPlaying=!sraPlaying;sraPlayEl.textContent=sraPlaying?"Pause SRA clip":"Play SRA clip";sraPlayEl.title=sraPlaying?"Pause SRA playback":"Start SRA playback";if(sraPlaying){animationClock=0;sraFrame=-1;}});
 [markerXEl,markerYEl,markerZEl].forEach(el=>el.addEventListener("input",writeMarkerFromForm));
 exportSceneEl.addEventListener("click",()=>{if(!model)return;const blob=new Blob([JSON.stringify({format:"soul-re-scene-v1",source:model.path,summary:model.summary,markers:model.markers},null,2)+"\n"],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${(model.summary.world_name||model.asset_type||"asset")}-scene.json`;a.click();URL.revokeObjectURL(a.href);});
 applyMarkersEl.addEventListener("click",async()=>{if(!directWritesEnabled||!model)return;if(!window.confirm(`Write marker changes directly to ${assetSelect.value}? A timestamped backup will be created first.`))return;applyMarkersEl.disabled=true;writeStatusEl.textContent="Writing backup and patched DRM…";try{const response=await fetch("/api/apply-markers",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:assetSelect.value,markers:model.markers})});const result=await response.json();if(!response.ok)throw new Error(result.error||"direct write failed");writeStatusEl.textContent=result.written?`Applied. Backup: ${result.backup}`:"No changes to write.";await loadPath(assetSelect.value);}catch(e){writeStatusEl.textContent=`Write failed: ${e.message}`;}finally{applyMarkersEl.disabled=!directWritesEnabled;}});

@@ -50,12 +50,15 @@ SRA files are the original relocatable object animation archives, not AI
 scripts. The viewer's SRA browser reads their root keylist table and exposes
 each embedded clip's key count, duration, section count, and channel-stream
 offsets. For example, `MORBOSS.SRA` contains 14 clips and automatically pairs
-with `MORBOSS_1.SRM` in the viewer. The **Play SRA clip** control remains
-disabled until the original compressed G2 channel streams are decoded and
-mapped to the remaster's SRM skeleton; the separate **Play/Pause SRL playback**
-button is live for the already-supported SRL matrix streams. Monster AI/state
-behavior is in executable overlays and object/event data, so it is not expected
-to be contained in the SRA archive.
+with `MORBOSS_1.SRM` in the viewer. The viewer now decodes the remaster's
+float-channel SRA blocks, including the packed G2
+rotation/scale/translation flags, builds frame matrices, and enables
+**Play/Pause SRA clip** for the paired SRM preview. Clips whose stream and flag
+counts differ report that they were decoded through their shared channel prefix.
+The separate **Play/Pause SRL playback** button remains live for the already-
+supported SRL matrix streams. Monster AI/state behavior is in executable
+overlays and object/event data, so it is not expected to be contained in the SRA
+archive.
 
 SRM previews now read the per-vertex material index and UV bytes, pair each
 material with its `<name>_D.DDS` diffuse texture from `1/TEX`, and render the

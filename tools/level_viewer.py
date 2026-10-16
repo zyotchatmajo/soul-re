@@ -486,6 +486,174 @@ def _sra_animation_catalog(path: Path) -> dict[str, object]:
     }
 
 
+def _sra_flag_channels(data: bytes, module_offset: int, flags_offset: int,
+                       active_bits: int, segment_count: int) -> list[tuple[str, int, int]]:
+    """Expand the packed G2 per-segment channel flags.
+
+    The first byte is the active channel-group mask (rotation, scale,
+    translation).  Each active group then contributes three bits per segment;
+    inactive groups do not consume space in the flag stream.  This is the
+    detail that is easy to miss when looking at an SRA in a hex editor.
+    """
+    flag_base = module_offset + flags_offset
+    bytes_per_group = (segment_count * 3 + 7) // 8
+    bit_offset = 8
+    channels: list[tuple[str, int, int]] = []
+    for group_bit, group_name in ((0x1, "rotation"), (0x2, "scale"), (0x4, "translation")):
+        if not (active_bits & group_bit):
+            continue
+        for segment in range(segment_count):
+            for component in range(3):
+                absolute_bit = bit_offset + segment * 3 + component
+                byte_offset = absolute_bit // 8
+                if (data[flag_base + byte_offset] >> (absolute_bit & 7)) & 1:
+                    channels.append((group_name, segment, component))
+        bit_offset += bytes_per_group * 8
+    return channels
+
+
+def _sra_stream_blocks(data: bytes, module_offset: int, start: int, end: int,
+                       key_count: int) -> list[list[float]]:
+    """Decode the remaster's float channel blocks.
+
+    In the remaster SRA files examined so far a channel is either mode 0
+    (``uint32 mode`` followed by one float per key) or mode 1 (mode plus one
+    constant float).  Keeping the parser strict about bounds makes malformed
+    archives report a useful error instead of producing corrupt animation.
+    """
+    if key_count <= 0:
+        return []
+    blocks: list[list[float]] = []
+    position = start
+    while position < end:
+        if position + 8 > end:
+            break
+        mode = struct.unpack_from("<I", data, module_offset + position)[0]
+        if mode == 0:
+            size = 4 + key_count * 4
+            if position + size > end:
+                raise ValueError("SRA mode-0 channel extends beyond its clip")
+            values = list(struct.unpack_from(f"<{key_count}f", data, module_offset + position + 4))
+        elif mode == 1:
+            size = 8
+            value = struct.unpack_from("<f", data, module_offset + position + 4)[0]
+            values = [value] * key_count
+        else:
+            # Last clips may be followed by alignment/padding.  Only accept
+            # padding when it is all zero; any other value is a real format
+            # mismatch and should be visible to the caller.
+            tail = data[module_offset + position:end]
+            if tail and not all(byte == 0 for byte in tail):
+                raise ValueError(f"unsupported SRA channel block mode {mode}")
+            break
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("SRA channel contains a non-finite value")
+        blocks.append(values)
+        position += size
+    return blocks
+
+
+def _sra_rotation_matrix(rotation: tuple[float, float, float]) -> tuple[float, ...]:
+    """Build a row-major ZYX Euler matrix from G2's 4096-unit angles."""
+    x, y, z = (value * (2.0 * math.pi / 4096.0) for value in rotation)
+    cx, sx = math.cos(x), math.sin(x)
+    cy, sy = math.cos(y), math.sin(y)
+    cz, sz = math.cos(z), math.sin(z)
+    # RotMatrixZYX is equivalent to Rz * Ry * Rx.
+    return (
+        cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx,
+        sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx,
+        -sy, cy * sx, cy * cx,
+    )
+
+
+def _sra_animation_frames(path: Path, clip_index: int, segment_count: int | None = None) -> dict[str, object]:
+    """Decode one SRA clip into frame-major affine matrices for the viewer.
+
+    The original runtime applies these values to its segment hierarchy.  The
+    viewer's SRM skinning data has no portable parent table, so this endpoint
+    emits per-segment local transforms; the browser then uses frame-zero as the
+    bind pose and applies the animated delta to weighted vertices.  Static
+    channels are preserved, while missing/unsupported channels retain G2's
+    identity defaults.
+    """
+    catalog = _sra_animation_catalog(path)
+    clips = catalog["clips"]
+    if not isinstance(clip_index, int) or clip_index < 0 or clip_index >= len(clips):
+        raise ValueError(f"SRA clip index is outside the archive: {clip_index}")
+    clip = clips[clip_index]
+    data = path.read_bytes()
+    module_offset = int(catalog["summary"]["module_offset"])
+    module_size = int(catalog["summary"]["module_size"])
+    next_keylist = int(clips[clip_index + 1]["keylist_offset"]) if clip_index + 1 < len(clips) else module_size
+    section_offsets = clip["section_data_offsets"]
+    if not section_offsets:
+        raise ValueError("SRA clip has no channel section")
+    key_count = int(clip["key_count"])
+    active_bits = int(clip["flags"])
+    if segment_count is None:
+        segment_count = 32
+    segment_count = max(1, min(int(segment_count), 128))
+    channels = _sra_flag_channels(data, module_offset, int(clip["flags_offset"]), active_bits, segment_count)
+    blocks = _sra_stream_blocks(
+        data, module_offset, int(section_offsets[0]), next_keylist, key_count
+    )
+    if not blocks:
+        raise ValueError("SRA clip contains no decodable channel blocks")
+
+    # Defaults match _G2Anim_InitializeSegValue.  Values are kept as floats;
+    # only rotations use G2's fixed 4096-unit angle conversion.
+    rotations = [[[0.0, 0.0, 0.0] for _ in range(segment_count)] for _ in range(key_count)]
+    scales = [[[1.0, 1.0, 1.0] for _ in range(segment_count)] for _ in range(key_count)]
+    translations = [[[0.0, 0.0, 0.0] for _ in range(segment_count)] for _ in range(key_count)]
+    decoded_channels = min(len(channels), len(blocks))
+    for channel, values in zip(channels[:decoded_channels], blocks[:decoded_channels]):
+        group, segment, component = channel
+        for frame, value in enumerate(values):
+            if group == "rotation":
+                rotations[frame][segment][component] = value
+            elif group == "scale":
+                # Remaster scale channels use the same 4096 baseline as G2.
+                scales[frame][segment][component] = value / 4096.0
+            else:
+                translations[frame][segment][component] = value
+
+    frames: list[list[tuple[float, ...]]] = []
+    for frame_index in range(key_count):
+        frame: list[tuple[float, ...]] = []
+        for segment in range(segment_count):
+            r = _sra_rotation_matrix(tuple(rotations[frame_index][segment]))
+            sx, sy, sz = scales[frame_index][segment]
+            tx, ty, tz = translations[frame_index][segment]
+            frame.append((
+                r[0] * sx, r[1] * sy, r[2] * sz, tx,
+                r[3] * sx, r[4] * sy, r[5] * sz, ty,
+                r[6] * sx, r[7] * sy, r[8] * sz, tz,
+            ))
+        frames.append(frame)
+    warning = None
+    if len(channels) != len(blocks):
+        warning = f"channel flags describe {len(channels)} channels, stream contains {len(blocks)}; decoded the shared prefix"
+    return {
+        "format": "soul-re-view-animation-v2",
+        "asset_type": "sra",
+        "path": path.as_posix(),
+        "summary": {
+            "clip_index": clip_index,
+            "frame_count": key_count,
+            "segment_count": segment_count,
+            "time_per_key": int(clip["time_per_key"]),
+            "duration_ms": int(clip["duration_ms"]),
+            "active_channel_bits": active_bits,
+            "flag_channel_count": len(channels),
+            "decoded_channel_count": decoded_channels,
+            "stream_block_count": len(blocks),
+            "warning": warning,
+        },
+        "frames": frames,
+    }
+
+
 def _safe_asset(root: Path, requested: str) -> Path:
     candidate = (root / unquote(requested)).resolve()
     try:
@@ -677,6 +845,23 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 if not requested:
                     raise ValueError("missing SRA animation archive path")
                 self._json(HTTPStatus.OK, _sra_animation_catalog(_safe_sra_asset(self.object_root, requested)))
+                return
+            if parsed.path == "/api/sra-frames":
+                requested = parse_qs(parsed.query).get("path", [""])[0]
+                if not requested:
+                    raise ValueError("missing SRA animation archive path")
+                try:
+                    clip_index = int(parse_qs(parsed.query).get("clip", ["0"])[0])
+                    segment_value = parse_qs(parsed.query).get("segments", [""])[0]
+                    segment_count = int(segment_value) if segment_value else None
+                except ValueError as exc:
+                    raise ValueError("SRA clip and segment values must be integers") from exc
+                self._json(
+                    HTTPStatus.OK,
+                    _sra_animation_frames(
+                        _safe_sra_asset(self.object_root, requested), clip_index, segment_count
+                    ),
+                )
                 return
             if parsed.path == "/api/texture-image":
                 requested = parse_qs(parsed.query).get("path", [""])[0]
