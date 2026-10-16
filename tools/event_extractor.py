@@ -82,6 +82,93 @@ MATH_NAMES = {
     12: "bit-test",
 }
 
+# These groups are deliberately based on the implementations in EVENT.c, not
+# on names guessed from the serialized data.  They make the report useful to a
+# human without pretending that the bytecode is a decompiled source script.
+ATTRIBUTE_SEMANTICS = {
+    "voice": {
+        "ATTR_VOICEPLAY",
+        "ATTR_VOICEVOL",
+        "ATTR_VOICEISDONE",
+        "ATTR_HASVOICESTARTED",
+        "ATTR_WAITFORVOICEDONE",
+    },
+    "sound_effect": {"ATTR_SOUND", "ATTR_SOUNDALARM", "ATTR_SET_VOLUME", "ATTR_SET_PITCH", "ATTR_MOVEVOLUME", "ATTR_MOVEPITCH"},
+    "movement": {
+        "ATTR_POSITION",
+        "ATTR_X",
+        "ATTR_Y",
+        "ATTR_Z",
+        "ATTR_ROTATION",
+        "ATTR_MOVEZ",
+        "ATTR_MOVEZSNAP",
+        "ATTR_WATERMOVEZ",
+        "ATTR_WATERMOVEZSNAP",
+        "ATTR_MOVESNAP",
+        "ATTR_MOVETOPOS",
+        "ATTR_SETPOSITION",
+        "ATTR_SETROTATION",
+        "ATTR_MOVETOROT",
+        "ATTR_MOVETOROLL",
+        "ATTR_ROTATETOWARD",
+        "ATTR_ANIMTOPOS",
+    },
+    "camera": {
+        "ATTR_CAMERA",
+        "ATTR_SMOOTH",
+        "ATTR_SPLINE0",
+        "ATTR_SPLINE1",
+        "ATTR_TILT",
+        "ATTR_DISTANCE",
+        "ATTR_RESTOREMODE",
+        "ATTR_SETFOCUS",
+        "ATTR_SCREENWIPE",
+        "ATTR_SHAKE",
+        "ATTR_ROLL",
+        "ATTR_MOVETOROLL",
+        "ATTR_LOOKAT",
+        "ATTR_STOPLOOKAT",
+    },
+    "animation": {
+        "ATTR_ANIMATE",
+        "ATTR_ANIMATION",
+        "ATTR_SETCLIP",
+        "ATTR_SETACTION",
+        "ATTR_FRAME",
+        "ATTR_PLAY",
+        "ATTR_PLAYLOOP",
+        "ATTR_PLAYTO",
+        "ATTR_FORWARD",
+        "ATTR_BACKWARD",
+        "ATTR_INTERPFRAMES",
+    },
+    "event_flow": {"ATTR_CALL", "ATTR_TIMER", "ATTR_SKIP_PUPPET_SHOW", "ATTR_PLAYMOVIE"},
+    "player_state": {
+        "ATTR_SPECTRAL",
+        "ATTR_MATERIAL",
+        "ATTR_FULL_HEALTH",
+        "ATTR_RAZ_HEALTH",
+        "ATTR_RAZ_MANA",
+        "ATTR_PLAYEREVENT",
+        "ATTR_PLAYEREVENTHISTORY",
+        "ATTR_HOLDING_ID",
+        "ATTR_ONGROUND",
+    },
+}
+
+COMPARISON_OPCODES = {
+    "compare_equal",
+    "compare_not_equal",
+    "increment_compare",
+    "decrement_compare",
+    "greater_than",
+    "not_less_than",
+    "less_than",
+    "not_greater_than",
+    "bitwise_and_test",
+    "execute_equals",
+}
+
 
 def _attribute_names() -> dict[int, str]:
     """Read the authoritative ATTR_ENUM names from the checked-in header."""
@@ -104,6 +191,102 @@ def _attribute_names() -> dict[int, str]:
 
 def _signed(value: int) -> int:
     return value - 0x10000 if value & 0x8000 else value
+
+
+def _attribute_semantics(name: str | None) -> list[str]:
+    if not name:
+        return []
+    return [group for group, names in ATTRIBUTE_SEMANTICS.items() if name in names]
+
+
+def _semantic_description(flags: set[str], is_condition: bool = False) -> str:
+    descriptions: list[str] = []
+    if is_condition:
+        descriptions.append("This is a condition; the action line runs only if it evaluates true.")
+    if "voice" in flags:
+        descriptions.append("It references streamed voice playback or a voice-completion check.")
+    if "sound_effect" in flags:
+        descriptions.append("It references an instance sound effect and may wait for that sound data to load.")
+    if "player_movement" in flags:
+        descriptions.append("It targets Raziel/player and reads or changes his position or rotation.")
+    elif "movement" in flags:
+        descriptions.append("It reads or changes an instance/terrain position, rotation, or movement path.")
+    if "camera" in flags:
+        descriptions.append("It changes the cinematic camera, spline, focus, or camera timing.")
+    if "animation" in flags:
+        descriptions.append("It selects, starts, stops, or seeks an instance animation.")
+    if "event_flow" in flags:
+        descriptions.append("It controls event sequencing, a timer, or a nested event call.")
+    if "player_state" in flags:
+        descriptions.append("It reads a player state such as material, health, mana, or player-event history.")
+    if not descriptions:
+        return "No high-level behavior was recognized; inspect the raw p-code words."
+    return " ".join(descriptions)
+
+
+def _annotate_script(script: dict[str, Any], is_condition: bool = False) -> None:
+    """Add conservative semantic labels to a script's token stream."""
+    flags: set[str] = set()
+    if is_condition:
+        flags.add("condition")
+    last_object_token: dict[str, Any] | None = None
+    voice_indices: list[int] = []
+    sound_numbers: list[int] = []
+    player_movement = False
+    tokens = script["tokens"]
+    for token_index, token in enumerate(tokens):
+        opcode = token["opcode"]
+        if opcode in {"push_object", "player_object", "game_object", "sublist_object"}:
+            last_object_token = token
+            if opcode == "player_object":
+                token["semantic"] = ["player_reference"]
+                flags.add("player_reference")
+            elif opcode == "game_object":
+                token["semantic"] = ["global_game_object"]
+            elif opcode == "sublist_object":
+                token["semantic"] = ["sublist_reference"]
+            else:
+                token["semantic"] = ["object_reference"]
+        elif opcode in COMPARISON_OPCODES:
+            token["semantic"] = ["condition_operator"]
+            flags.add("comparison")
+        if opcode == "modify_attribute":
+            attr = token.get("attribute")
+            semantic = _attribute_semantics(attr)
+            token["semantic"] = semantic
+            flags.update(semantic)
+            next_token = tokens[token_index + 1] if token_index + 1 < len(tokens) else None
+            if attr == "ATTR_VOICEPLAY" and next_token and next_token.get("opcode") == "push_number":
+                token["value_hint"] = next_token.get("operand")
+                voice_indices.append(next_token.get("operand"))
+            elif attr == "ATTR_SOUND" and next_token:
+                # ATTR_SOUND consumes one raw short directly in the C parser,
+                # so it is not encoded as a normal push_number opcode.
+                token["sound_number_hint"] = next_token.get("raw")
+                sound_numbers.append(next_token.get("raw"))
+            if last_object_token is not None:
+                token["target_opcode"] = last_object_token["opcode"]
+                if "operand" in last_object_token:
+                    token["target_object_index"] = last_object_token["operand"]
+                if last_object_token["opcode"] == "player_object":
+                    flags.add("player_reference")
+                    if "movement" in semantic:
+                        player_movement = True
+    if player_movement:
+        flags.add("player_movement")
+    script["semantic_flags"] = sorted(flags)
+    if voice_indices:
+        script["voice_indices"] = voice_indices
+    if sound_numbers:
+        script["sound_numbers"] = sound_numbers
+    script["human_summary"] = _semantic_description(flags, is_condition=is_condition)
+    details: list[str] = []
+    if voice_indices:
+        details.append("voice index/indices: " + ", ".join(str(value) for value in voice_indices))
+    if sound_numbers:
+        details.append("instance sound number(s): " + ", ".join(str(value) for value in sound_numbers))
+    if details:
+        script["human_summary"] += " " + "; ".join(details) + "."
 
 
 class EventReader:
@@ -141,7 +324,7 @@ class EventReader:
         raw = self._range(relative, min(self.module_size - relative, 256), "string")
         return raw.split(b"\0", 1)[0].decode("ascii", errors="replace")
 
-    def _script(self, relative: int | None) -> dict[str, Any] | None:
+    def _script(self, relative: int | None, is_condition: bool = False) -> dict[str, Any] | None:
         if not relative:
             return None
         size, condition_bits, data_relative = struct.unpack(
@@ -149,7 +332,7 @@ class EventReader:
         )
         raw = self._range(data_relative, size * 2, "script data")
         words = list(struct.unpack("<" + "h" * size, raw)) if size else []
-        return {
+        result = {
             "relative_offset": relative,
             "size_words": size,
             "condition_bits": condition_bits,
@@ -157,6 +340,8 @@ class EventReader:
             "words": words,
             "tokens": self._tokens(words),
         }
+        _annotate_script(result, is_condition=is_condition)
+        return result
 
     def _tokens(self, words: list[int]) -> list[dict[str, Any]]:
         tokens: list[dict[str, Any]] = []
@@ -177,6 +362,7 @@ class EventReader:
                     token["attribute"] = self.attributes.get(
                         operand & 0xFFFF, f"ATTR_0x{operand & 0xFFFF:X}"
                     )
+                    token["attribute_value"] = operand & 0xFFFF
                 index += 1
             elif unsigned in {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 32}:
                 token["operation"] = MATH_NAMES.get(unsigned - 12, "unknown")
@@ -267,8 +453,22 @@ class EventReader:
             for action_index in range(num_actions):
                 condition_relative = self._u32(conditional_list + action_index * 4)
                 action_relative = self._u32(action_list + action_index * 4)
-                condition = self._script(condition_relative) if condition_relative else None
+                condition = self._script(condition_relative, is_condition=True) if condition_relative else None
                 action = self._script(action_relative) if action_relative else None
+                for script in (condition, action):
+                    if script:
+                        for token in script["tokens"]:
+                            object_index = token.get("target_object_index")
+                            if object_index is not None and 0 <= object_index < len(objects):
+                                target = objects[object_index]
+                                token["target"] = {
+                                    "index": object_index,
+                                    "type": target.get("type"),
+                                    "intro_name": target.get("intro_name"),
+                                    "event_number": target.get("event_number"),
+                                    "signal_number": target.get("signal_number"),
+                                    "tgroup_number": target.get("tgroup_number"),
+                                }
                 all_scripts = [script for script in (condition, action) if script]
                 attrs = sorted(
                     {
@@ -289,6 +489,36 @@ class EventReader:
                         ],
                     }
                 )
+                action_entry = actions[-1]
+                semantic_flags = sorted(
+                    {
+                        flag
+                        for script in all_scripts
+                        for flag in script.get("semantic_flags", [])
+                        if flag != "condition"
+                    }
+                )
+                action_entry["semantic_flags"] = semantic_flags
+                action_entry["human_summary"] = _semantic_description(
+                    set(semantic_flags), is_condition=condition is not None
+                )
+                evidence: list[str] = []
+                for script in all_scripts:
+                    for token in script["tokens"]:
+                        attr = token.get("attribute")
+                        if attr == "ATTR_VOICEPLAY" and "value_hint" in token:
+                            evidence.append(f"voice index {token['value_hint']}")
+                        elif attr == "ATTR_SOUND" and "sound_number_hint" in token:
+                            evidence.append(f"instance sound {token['sound_number_hint']}")
+                        elif attr == "ATTR_CALL" and token.get("target"):
+                            target = token["target"]
+                            if target.get("event_number") is not None:
+                                evidence.append(f"calls event {target['event_number']}")
+                        elif attr in ATTRIBUTE_SEMANTICS["movement"] and token.get("target_opcode") == "player_object":
+                            evidence.append(f"player movement via {attr}")
+                action_entry["evidence"] = list(dict.fromkeys(evidence))
+                if evidence:
+                    action_entry["human_summary"] += " Evidence: " + "; ".join(dict.fromkeys(evidence)) + "."
             camera_attrs = sorted(
                 {
                     attribute["name"]
@@ -296,6 +526,13 @@ class EventReader:
                     for attribute in action["attributes"]
                     if attribute["name"].startswith("ATTR_CAMERA")
                     or attribute["name"] in {"ATTR_SMOOTH", "ATTR_SPLINE0", "ATTR_SPLINE1", "ATTR_TILT", "ATTR_DISTANCE", "ATTR_RESTOREMODE", "ATTR_SETFOCUS", "ATTR_SCREENWIPE", "ATTR_MOVETOPOS", "ATTR_SETPOSITION", "ATTR_SETROTATION", "ATTR_MOVETOROT", "ATTR_LOOKAT", "ATTR_STOPLOOKAT"}
+                }
+            )
+            event_flags = sorted(
+                {
+                    flag
+                    for action in actions
+                    for flag in action.get("semantic_flags", [])
                 }
             )
             events.append(
@@ -311,6 +548,14 @@ class EventReader:
                     "objects": objects,
                     "actions": actions,
                     "camera_attributes": camera_attrs,
+                    "semantic_flags": event_flags,
+                    "human_summary": (
+                        "This is a puppet-show/definition event: it is dormant until another event calls it. "
+                        "Once processing starts, one action line is attempted per game update and a timer, "
+                        "voice wait, or sound-load wait can pause it."
+                        if event_number < 0
+                        else "This is a normal event: its condition/action lines are checked from the event-processing pass."
+                    ),
                 }
             )
         summary = _parse_drm(self.path)
@@ -348,7 +593,12 @@ def _script_text(script: dict[str, Any] | None) -> str:
         token_text.append(item)
     if len(script["tokens"]) > 48:
         token_text.append("…")
-    return f"{script['size_words']} words{suffix}\n    pcode: " + ", ".join(token_text)
+    flags = ", ".join(script.get("semantic_flags", [])) or "none"
+    return (
+        f"{script['size_words']} words; semantics={flags}\n"
+        f"    meaning: {script.get('human_summary', '')}\n"
+        "    pcode: " + ", ".join(token_text)
+    )
 
 
 def to_markdown(report: dict[str, Any]) -> str:
@@ -361,7 +611,15 @@ def to_markdown(report: dict[str, Any]) -> str:
         "",
         "## Runtime model",
         "",
-        "The game loads `Level.PuzzleInstances`, then `EVENT_ProcessEvents` walks each event. A non-negative event number is processed immediately; a negative event number is a puppet-show/definition entry and is only advanced when its `processingPuppetShow` state is set. Each action line may have a condition script and/or an action script. The scripts are a small stack VM; the report keeps raw 16-bit words and labels the object, number, attribute, comparison, and camera-related tokens that can be identified statically.",
+        "The game loads `Level.PuzzleInstances`, then `EVENT_ProcessEvents` walks each event. A non-negative event number is processed immediately. A negative event number is a puppet-show/definition entry: it is dormant until another event uses `ATTR_CALL` on it, which sets `processingPuppetShow`; after that, `EVENT_ProcessPuppetShow` attempts one action line at a time. A line can be gated by a condition script. `ATTR_TIMER`, voice-wait attributes, and sound-loading can set `EventAbortLine`, causing that line to resume later. The scripts are a small stack VM; this report preserves raw 16-bit words and adds conservative semantic labels.",
+        "",
+        "## How to answer common questions",
+        "",
+        "- **Voice line:** find `voice` in an event/line's semantics, especially `ATTR_VOICEPLAY`. The following number is the streamed voice index. `ATTR_VOICEISDONE`/`ATTR_WAITFORVOICEDONE` are completion/wait checks. `ATTR_SOUND` is an instance SFX, not a streamed voice line.",
+        "- **Raziel moves:** find `player_movement`. It means the script used `player_object` together with a position/rotation/movement attribute such as `ATTR_SETPOSITION`, `ATTR_POSITION`, or `ATTR_SETROTATION`.",
+        "- **A condition:** inspect the `condition:` block on the same line. Comparison tokens and the referenced object/attribute show what must be true before the action runs.",
+        "- **Camera:** find `camera`; the report lists the camera attributes and the target spline/marker object where it can resolve one.",
+        "The labels are static evidence, not a guarantee that the line ran in a particular playthrough. To prove runtime behavior, combine this report with the signal/event that calls the line and the relevant condition values.",
         "",
         "## Events",
         "",
@@ -373,6 +631,9 @@ def to_markdown(report: dict[str, Any]) -> str:
         lines.append(
             f"Instances: **{event['num_instances']}** · Actions: **{event['num_actions']}** · Puppet state: `{event['processing_puppet_show']}` · Variables: `{event['event_variables']}`"
         )
+        lines.append(f"Meaning: {event.get('human_summary', '')}")
+        if event.get("semantic_flags"):
+            lines.append(f"Semantic flags: `{', '.join(event['semantic_flags'])}`")
         if event["camera_attributes"]:
             lines.append(f"Camera-related attributes: `{', '.join(event['camera_attributes'])}`")
         lines.append("")
@@ -390,7 +651,11 @@ def to_markdown(report: dict[str, Any]) -> str:
         lines.append("Actions:")
         for action in event["actions"]:
             attrs = ", ".join(item["name"] for item in action["attributes"]) or "none"
-            lines.append(f"- **line {action['index']}**; attributes: `{attrs}`")
+            flags = ", ".join(action.get("semantic_flags", [])) or "none"
+            lines.append(f"- **line {action['index']}**; attributes: `{attrs}`; semantics: `{flags}`")
+            lines.append(f"  - meaning: {action.get('human_summary', '')}")
+            if action.get("evidence"):
+                lines.append(f"  - evidence: `{'; '.join(action['evidence'])}`")
             lines.append(f"  - condition: {_script_text(action['condition'])}")
             lines.append(f"  - action: {_script_text(action['action'])}")
         lines.append("")
