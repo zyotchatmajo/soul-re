@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import struct
 from pathlib import Path
 
@@ -137,6 +138,63 @@ def build_morph_normal_indices(face_blob: bytes) -> bytes:
     result = bytearray((len(face_blob) // 0x0C) * 2)
     for index, offset in enumerate(range(0, len(face_blob), 0x0C)):
         struct.pack_into("<h", result, index * 2, struct.unpack_from("<h", face_blob, offset + 0x08)[0])
+    return bytes(result)
+
+
+def remap_native_vertex_positions(native_vertices: bytes, early_vertices: bytes) -> bytes:
+    """Replace native positions with nearest prototype positions.
+
+    Native City2 topology is retained because its BSP, face, material, and
+    companion files are known to be accepted by the PC build.  Prototype
+    vertices are in the same coordinate space, so a nearest-position map lets
+    us import their placement without changing native array capacities.
+    """
+    if len(native_vertices) % 0x0C or len(early_vertices) % 0x0C:
+        raise ValueError("vertex blobs are not aligned to TVertex records")
+    early_positions = [
+        struct.unpack_from("<hhh", early_vertices, offset)
+        for offset in range(0, len(early_vertices), 0x0C)
+    ]
+    if not early_positions:
+        raise ValueError("prototype has no vertices")
+    exact: dict[tuple[int, int, int], tuple[int, int, int]] = {}
+    buckets: dict[tuple[int, int, int], list[tuple[int, int, int]]] = {}
+    bucket_size = 256
+
+    def bucket(point: tuple[int, int, int]) -> tuple[int, int, int]:
+        return tuple(math.floor(value / bucket_size) for value in point)
+
+    for point in early_positions:
+        exact.setdefault(point, point)
+        buckets.setdefault(bucket(point), []).append(point)
+
+    result = bytearray(native_vertices)
+    for offset in range(0, len(result), 0x0C):
+        native = struct.unpack_from("<hhh", result, offset)
+        match = exact.get(native)
+        if match is None:
+            best_distance: int | None = None
+            match = None
+            center = bucket(native)
+            for radius in range(0, 9):
+                candidates: list[tuple[int, int, int]] = []
+                for bx in range(center[0] - radius, center[0] + radius + 1):
+                    for by in range(center[1] - radius, center[1] + radius + 1):
+                        for bz in range(center[2] - radius, center[2] + radius + 1):
+                            candidates.extend(buckets.get((bx, by, bz), ()))
+                for candidate in candidates:
+                    distance = sum((native[index] - candidate[index]) ** 2 for index in range(3))
+                    if best_distance is None or distance < best_distance:
+                        best_distance = distance
+                        match = candidate
+                if match is not None:
+                    break
+            if match is None:
+                match = min(
+                    early_positions,
+                    key=lambda candidate: sum((native[index] - candidate[index]) ** 2 for index in range(3)),
+                )
+        struct.pack_into("<hhh", result, offset, *match)
     return bytes(result)
 
 
@@ -336,6 +394,7 @@ def convert(
     copy_early_bsp_graph: bool = False,
     rebalance_bsp: bool = False,
     sanitize_materials: bool = False,
+    match_native_vertices: bool = False,
 ) -> dict[str, object]:
     early = early_path.read_bytes()
     template = bytearray(template_path.read_bytes())
@@ -419,8 +478,11 @@ def convert(
             template, template_module + native_normal_rel, native_counts["normals"], 0x08, "template normal"
         )
         vertex_bytes = bytearray(native_vertices)
-        copy_size = min(len(vertex_bytes), len(arrays["vertices"]))
-        vertex_bytes[:copy_size] = arrays["vertices"][:copy_size]
+        if match_native_vertices:
+            vertex_bytes[:] = remap_native_vertex_positions(bytes(vertex_bytes), arrays["vertices"])
+        else:
+            copy_size = min(len(vertex_bytes), len(arrays["vertices"]))
+            vertex_bytes[:copy_size] = arrays["vertices"][:copy_size]
         arrays = {
             "vertices": bytes(vertex_bytes),
             "faces": native_faces,
@@ -596,6 +658,7 @@ def convert(
         "stream_unit_id": stream_unit_id,
         "remapped_material_offsets": remapped_materials,
         "resized_morph_data": resized_morph_data,
+        "matched_native_vertices": match_native_vertices,
     }
 
 
@@ -636,6 +699,11 @@ def main() -> int:
         action="store_true",
         help="remap prototype TFace texture offsets into the wrapper texture table",
     )
+    parser.add_argument(
+        "--match-native-vertices",
+        action="store_true",
+        help="map each native vertex position to its nearest prototype position",
+    )
     args = parser.parse_args()
     for path in (args.early, args.template):
         if not path.is_file():
@@ -652,6 +720,7 @@ def main() -> int:
         copy_early_bsp_graph=args.copy_early_bsp,
         rebalance_bsp=args.rebalance_native_bsp,
         sanitize_materials=args.sanitize_materials,
+        match_native_vertices=args.match_native_vertices,
     )
     print(json.dumps(result, indent=2))
     return 0
