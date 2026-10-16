@@ -135,6 +135,8 @@ def convert(
     preserve_template_topology: bool = False,
     cap_to_native: bool = False,
     in_place_native: bool = False,
+    world_name: str | None = None,
+    stream_unit_id: int | None = None,
 ) -> dict[str, object]:
     early = early_path.read_bytes()
     template = bytearray(template_path.read_bytes())
@@ -145,6 +147,21 @@ def convert(
     template_terrain_rel = u32(template, template_module)
     early_terrain = early_module + early_terrain_rel
     template_terrain = template_module + template_terrain_rel
+
+    if world_name is not None:
+        if not world_name or "\0" in world_name or len(world_name) > 15:
+            raise ValueError("--world-name must be 1-15 characters without NUL")
+        world_relative = u32(template, template_module + 0x98)
+        world_start = template_module + world_relative
+        old_end = template.find(b"\0", world_start)
+        if world_relative == 0 or old_end < world_start:
+            raise ValueError("template has no writable Level.worldName string")
+        capacity = old_end - world_start
+        if len(world_name) > capacity:
+            raise ValueError("replacement world name is longer than template storage")
+        template[world_start : old_end + 1] = world_name.encode("ascii") + b"\0" * (capacity - len(world_name) + 1)
+    if stream_unit_id is not None:
+        struct.pack_into("<i", template, template_module + 0xF8, int(stream_unit_id))
 
     # The extracted prototype scenes in D:\\2 16 use the serialized Terrain
     # layout recognized by the existing viewer (counts at 0x10/0x14/0x18).
@@ -310,6 +327,8 @@ def convert(
         "output_size": len(template),
         "patched_bsp_leaf_face_pointers": patched_leaf_faces,
         "mode": "topology-preserving" if preserve_template_topology else "geometry-wrapper",
+        "world_name": world_name,
+        "stream_unit_id": stream_unit_id,
     }
 
 
@@ -333,6 +352,8 @@ def main() -> int:
         action="store_true",
         help="overwrite native arrays without changing serialized pointers or file size (requires --cap-to-native)",
     )
+    parser.add_argument("--world-name", help="replace the template Level.worldName string")
+    parser.add_argument("--stream-unit-id", type=int, help="replace the template Level.streamUnitID")
     args = parser.parse_args()
     for path in (args.early, args.template):
         if not path.is_file():
@@ -344,6 +365,8 @@ def main() -> int:
         preserve_template_topology=args.preserve_template_topology,
         cap_to_native=args.cap_to_native,
         in_place_native=args.in_place_native,
+        world_name=args.world_name,
+        stream_unit_id=args.stream_unit_id,
     )
     print(json.dumps(result, indent=2))
     return 0
