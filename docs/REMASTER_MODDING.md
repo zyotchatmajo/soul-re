@@ -126,3 +126,27 @@ disabled.
 The installed copy currently has a pre-existing DLL backup/modification, so a
 staging copy is especially important for separating our asset tests from
 unrelated executable changes.
+
+## Importing an early-build level
+
+The July 14, 1999 prototype in `D:\\2 16` uses an alternate BIGFILE index, but
+the disc's `CATDATA` still gives us the stored offset for every file.  The
+extractor reads `CATDATA` from the sibling file or directly from the PSX image,
+then copies the catalog span without changing the source archive:
+
+```powershell
+python tools/extract_early_bigfile.py `
+  --source 'D:\\2 16' `
+  --output build/early-mrlock6 `
+  --select '*mrlock6.drm' `
+  --pcm
+```
+
+For area scenes, `--pcm` changes only the output extension (`.drm` → `.pcm`);
+the relocatable bytes and their padding are preserved.  This is enough for the
+viewer to parse the early scene as a `pcm-level` and is the first compatibility
+test.  It is not yet proof that the remaster runtime accepts every early
+asset: the prototype scene has a different relocation-table size and marker
+layout from the remaster's corresponding PCM, and its companion `.crm` files
+may need a separate mapping.  Test the staged output first, then make a backup
+before replacing a loose file in the Steam `AREA` tree.
