@@ -134,6 +134,7 @@ def convert(
     output_path: Path,
     preserve_template_topology: bool = False,
     cap_to_native: bool = False,
+    in_place_native: bool = False,
 ) -> dict[str, object]:
     early = early_path.read_bytes()
     template = bytearray(template_path.read_bytes())
@@ -201,6 +202,45 @@ def convert(
             "normals": native_normals,
         }
         output_counts = native_counts
+
+    if in_place_native:
+        if not cap_to_native:
+            raise ValueError("--in-place-native requires --cap-to-native")
+        # Keep the native relocation table, pointers, BSP topology, and file
+        # length completely unchanged.  This matters for the console loader:
+        # its relocation pass compacts the module in-place, so a replacement
+        # array is safer than adding new pointer targets and redirecting the
+        # serialized Terrain fields.
+        native_vertex_rel = u32(template, template_terrain + 0x1C)
+        native_face_rel = u32(template, template_terrain + 0x20)
+        native_normal_rel = u32(template, template_terrain + 0x24)
+        for name, relative in (
+            ("vertices", native_vertex_rel),
+            ("faces", native_face_rel),
+            ("normals", native_normal_rel),
+        ):
+            blob = arrays[name]
+            start = template_module + relative
+            end = start + len(blob)
+            if start < template_module or end > len(template):
+                raise ValueError(f"native {name} array is outside template")
+            template[start:end] = blob
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(template)
+        return {
+            "input_early": str(early_path),
+            "input_template": str(template_path),
+            "output": str(output_path),
+            "early_module_offset": early_module,
+            "template_module_offset": template_module,
+            "early_relocation_count": early_relocs,
+            "template_relocation_count": template_relocs,
+            "early_terrain_relative": early_terrain_rel,
+            "template_terrain_relative": template_terrain_rel,
+            "counts": output_counts,
+            "mode": "in-place-native",
+            "output_size": len(template),
+        }
 
     # Append aligned arrays to the existing native module.  The wrapper's
     # relocation entries already include the three native Terrain pointer
@@ -288,6 +328,11 @@ def main() -> int:
         action="store_true",
         help="keep prototype triangle relationships while capping arrays to native remaster counts",
     )
+    parser.add_argument(
+        "--in-place-native",
+        action="store_true",
+        help="overwrite native arrays without changing serialized pointers or file size (requires --cap-to-native)",
+    )
     args = parser.parse_args()
     for path in (args.early, args.template):
         if not path.is_file():
@@ -298,6 +343,7 @@ def main() -> int:
         args.output,
         preserve_template_topology=args.preserve_template_topology,
         cap_to_native=args.cap_to_native,
+        in_place_native=args.in_place_native,
     )
     print(json.dumps(result, indent=2))
     return 0
