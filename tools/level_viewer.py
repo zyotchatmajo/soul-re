@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import datetime as dt
 import hashlib
 import json
@@ -291,12 +292,16 @@ def _srm_geometry(path: Path) -> dict[str, object]:
     vertices: list[tuple[float, float, float]] = []
     bone_indices: list[tuple[int, int, int]] = []
     bone_weights: list[tuple[int, int, int]] = []
+    material_indices: list[int] = []
+    uvs: list[tuple[float, float]] = []
     bounds_min = [float("inf"), float("inf"), float("inf")]
     bounds_max = [float("-inf"), float("-inf"), float("-inf")]
     for _ in range(vertex_count):
         x, y, z = struct.unpack_from("<3f", data, offset)
+        material_indices.append(data[offset + 19])
         vertex_bone_indices = tuple(data[offset + 20 : offset + 23])
         vertex_bone_weights = tuple(data[offset + 25 : offset + 28])
+        uvs.append((data[offset + 23] / 255.0, 1.0 - data[offset + 27] / 255.0))
         offset += 32
         if not all(math.isfinite(value) for value in (x, y, z)):
             raise ValueError("SRM contains a non-finite vertex")
@@ -325,6 +330,7 @@ def _srm_geometry(path: Path) -> dict[str, object]:
         "shader_count": shader_count,
         "texture_count": texture_count,
         "textures": texture_names,
+        "texture_files": [f"{name}_D.DDS" for name in texture_names],
         "extra_bone_count": extra_bone_count,
         "bone_count": bone_count,
         "vertex_count": vertex_count,
@@ -342,6 +348,9 @@ def _srm_geometry(path: Path) -> dict[str, object]:
         "bone_matrices": bone_matrices,
         "bone_indices": bone_indices,
         "bone_weights": bone_weights,
+        "material_indices": material_indices,
+        "uvs": uvs,
+        "texture_files": [f"{name}_D.DDS" for name in texture_names],
         "markers": [],
     }
 
@@ -541,6 +550,19 @@ def _safe_sra_asset(root: Path | None, requested: str) -> Path:
     return candidate
 
 
+def _safe_texture_asset(root: Path | None, requested: str) -> Path:
+    if root is None:
+        raise FileNotFoundError("texture root is not configured")
+    candidate = (root / unquote(requested)).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("texture path escapes the configured texture root") from exc
+    if candidate.suffix.lower() not in {".dds", ".png", ".jpg", ".jpeg"} or not candidate.is_file():
+        raise FileNotFoundError(f"texture not found: {requested}")
+    return candidate
+
+
 def _sha1(path: Path) -> str:
     digest = hashlib.sha1()
     with path.open("rb") as stream:
@@ -552,6 +574,7 @@ def _sha1(path: Path) -> str:
 class ViewerHandler(BaseHTTPRequestHandler):
     root: Path
     object_root: Path | None = None
+    texture_root: Path | None = None
     write_root: Path | None = None
     default_asset: str = ""
     html: bytes
@@ -654,6 +677,21 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 if not requested:
                     raise ValueError("missing SRA animation archive path")
                 self._json(HTTPStatus.OK, _sra_animation_catalog(_safe_sra_asset(self.object_root, requested)))
+                return
+            if parsed.path == "/api/texture-image":
+                requested = parse_qs(parsed.query).get("path", [""])[0]
+                if not requested:
+                    raise ValueError("missing texture path")
+                source = _safe_texture_asset(self.texture_root, requested)
+                try:
+                    from PIL import Image
+                except ImportError as exc:
+                    raise RuntimeError("texture preview requires Pillow (pip install Pillow)") from exc
+                with Image.open(source) as image:
+                    image.thumbnail((4096, 4096), Image.Resampling.LANCZOS)
+                    output = io.BytesIO()
+                    image.convert("RGBA").save(output, format="PNG", optimize=True)
+                self._send(HTTPStatus.OK, "image/png", output.getvalue())
                 return
             if parsed.path == "/api/write-status":
                 self._json(
@@ -788,6 +826,11 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="root containing standalone object PCMs (default: sibling OBJECT directory)",
     )
+    parser.add_argument(
+        "--texture-root",
+        type=Path,
+        help="root containing remaster DDS textures (default: sibling TEX directory)",
+    )
     args = parser.parse_args(argv)
 
     root = args.root.resolve()
@@ -801,6 +844,9 @@ def main(argv: list[str] | None = None) -> int:
     object_root = args.object_root.resolve() if args.object_root else root.parent / "OBJECT"
     if not object_root.is_dir():
         object_root = None
+    texture_root = args.texture_root.resolve() if args.texture_root else root.parent / "TEX"
+    if not texture_root.is_dir():
+        texture_root = None
     try:
         initial = _safe_asset(root, args.drm)
     except (FileNotFoundError, ValueError):
@@ -811,6 +857,7 @@ def main(argv: list[str] | None = None) -> int:
     handler = type("ConfiguredViewerHandler", (ViewerHandler,), {})
     handler.root = root
     handler.object_root = object_root
+    handler.texture_root = texture_root
     handler.write_root = write_root
     handler.default_asset = initial.relative_to(root).as_posix() if initial else ""
     handler.html = html
@@ -819,6 +866,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Soul Reaver 3D viewer: {url}")
     print(f"Asset root: {root}")
     print(f"Object root: {object_root if object_root else '<not configured; use --object-root>'}")
+    print(f"Texture root: {texture_root if texture_root else '<not configured; use --texture-root>'}")
     print(f"Write root: {write_root if write_root else '<disabled; use --write-root to enable>'}")
     print("Press Ctrl+C to stop.")
     if args.open:

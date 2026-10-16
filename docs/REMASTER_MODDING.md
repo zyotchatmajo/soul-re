@@ -50,11 +50,17 @@ SRA files are the original relocatable object animation archives, not AI
 scripts. The viewer's SRA browser reads their root keylist table and exposes
 each embedded clip's key count, duration, section count, and channel-stream
 offsets. For example, `MORBOSS.SRA` contains 14 clips and automatically pairs
-with `MORBOSS_1.SRM` in the viewer. Playing those clips requires decoding the
-original compressed G2 channel streams and mapping the PS1 segment hierarchy to
-the remaster's SRM skeleton; that is a separate decoder task. Monster AI/state
+with `MORBOSS_1.SRM` in the viewer. The **Play SRA clip** control remains
+disabled until the original compressed G2 channel streams are decoded and
+mapped to the remaster's SRM skeleton; the separate **Play/Pause SRL playback**
+button is live for the already-supported SRL matrix streams. Monster AI/state
 behavior is in executable overlays and object/event data, so it is not expected
 to be contained in the SRA archive.
+
+SRM previews now read the per-vertex material index and UV bytes, pair each
+material with its `<name>_D.DDS` diffuse texture from `1/TEX`, and render the
+material groups in WebGL. The viewer converts DDS to browser-compatible PNG on
+demand; `--texture-root` can override the automatic sibling `TEX` directory.
 
 The viewer can therefore inspect remaster levels directly:
 
@@ -62,6 +68,7 @@ The viewer can therefore inspect remaster levels directly:
 python tools/level_viewer.py `
   --root 'F:\SteamLibrary\steamapps\common\Soul Reaver I-II\1\AREA' `
   --object-root 'F:\SteamLibrary\steamapps\common\Soul Reaver I-II\1\OBJECT' `
+  --texture-root 'F:\SteamLibrary\steamapps\common\Soul Reaver I-II\1\TEX' `
   --drm CITY/BIN/city9.drm `
   --open
 ```

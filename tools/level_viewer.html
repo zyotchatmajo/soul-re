@@ -43,6 +43,7 @@
     .help { font-size: 12px; }
     input[type=checkbox] { accent-color: #38bdf8; }
     .check { display: flex; align-items: center; gap: 7px; margin: 11px 0; color: var(--muted); }
+    #texturePreview { display: block; width: 100%; max-height: 180px; object-fit: contain; image-rendering: auto; background: #080d16; border: 1px solid var(--line); border-radius: 5px; }
   </style>
 </head>
 <body>
@@ -68,6 +69,7 @@
     <label for="animationAsset">animation SRL</label>
     <select id="animationAsset"><option value="">no animation</option></select>
     <label class="check"><input id="animationPlaying" type="checkbox" checked> play animation</label>
+    <button id="animationToggle" style="margin-top:4px">Pause SRL playback</button>
     <label for="animationSpeed">animation speed <span id="animationSpeedValue">1.0×</span></label>
     <input id="animationSpeed" type="range" min="0.1" max="2" step="0.1" value="1">
     <p class="help">SRL files contain skeletal matrix frames. Select an SRM and an SRL to preview weighted playback; PCM meshes remain static.</p>
@@ -75,7 +77,10 @@
     <select id="sraAsset"><option value="">choose an SRA archive</option></select>
     <label for="sraClip">SRA clip</label>
     <select id="sraClip" disabled><option value="">select an archive first</option></select>
+    <button id="sraPlay" style="margin-top:8px" disabled title="The remaster SRA channel decoder is not available yet">Play SRA clip (decoder pending)</button>
     <div id="sraInfo" class="help">SRA clips are catalogued here; compressed G2 playback is not enabled yet.</div>
+    <label>diffuse texture preview</label>
+    <img id="texturePreview" alt="No diffuse texture loaded" hidden>
     <label for="objectName">name</label>
     <input id="objectName" value="custom_object" maxlength="48">
     <div class="coord-grid" style="margin-top:8px">
@@ -133,7 +138,10 @@ const animationAssetEl = document.getElementById("animationAsset");
 const sraAssetEl = document.getElementById("sraAsset");
 const sraClipEl = document.getElementById("sraClip");
 const sraInfoEl = document.getElementById("sraInfo");
+const sraPlayEl = document.getElementById("sraPlay");
+const texturePreviewEl = document.getElementById("texturePreview");
 const animationPlayingEl = document.getElementById("animationPlaying");
+const animationToggleEl = document.getElementById("animationToggle");
 const animationSpeedEl = document.getElementById("animationSpeed");
 const animationSpeedValueEl = document.getElementById("animationSpeedValue");
 const objectNameEl = document.getElementById("objectName");
@@ -154,14 +162,19 @@ if (!gl) { statusEl.textContent = "WebGL unavailable"; throw new Error("WebGL un
 const vertexSource = `
   attribute vec3 a_position;
   attribute vec3 a_color;
+  attribute vec2 a_uv;
   uniform mat4 u_matrix;
   varying vec3 v_color;
-  void main() { gl_Position = u_matrix * vec4(a_position, 1.0); v_color = a_color; gl_PointSize = 9.0; }
+  varying vec2 v_uv;
+  void main() { gl_Position = u_matrix * vec4(a_position, 1.0); v_color = a_color; v_uv = a_uv; gl_PointSize = 9.0; }
 `;
 const fragmentSource = `
   precision mediump float;
   varying vec3 v_color;
-  void main() { gl_FragColor = vec4(v_color, 1.0); }
+  varying vec2 v_uv;
+  uniform sampler2D u_texture;
+  uniform int u_use_texture;
+  void main() { gl_FragColor = u_use_texture == 1 ? texture2D(u_texture, v_uv) : vec4(v_color, 1.0); }
 `;
 function shader(type, source) { const s = gl.createShader(type); gl.shaderSource(s, source); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
 const program = gl.createProgram();
@@ -172,11 +185,15 @@ if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProg
 gl.useProgram(program);
 const positionLoc = gl.getAttribLocation(program, "a_position");
 const colorLoc = gl.getAttribLocation(program, "a_color");
+const uvLoc = gl.getAttribLocation(program, "a_uv");
 const matrixLoc = gl.getUniformLocation(program, "u_matrix");
+const textureLoc = gl.getUniformLocation(program, "u_texture");
+const useTextureLoc = gl.getUniformLocation(program, "u_use_texture");
 
 let model = null;
 let geometryBuffer = null;
 let colorBuffer = null;
+let uvBuffer = null;
 let indexBuffer = null;
 let markerBuffer = null;
 let markerColorBuffer = null;
@@ -190,6 +207,8 @@ let objectMeshBuffer = null;
 let objectMeshColorBuffer = null;
 let objectMeshIndexBuffer = null;
 let objectMeshIndexCount = 0;
+let textureGroups = [];
+let loadedTextures = new Map();
 let placements = [];
 let objectAssets = new Map();
 let animationAssets = new Map();
@@ -233,7 +252,7 @@ function putAttribute(buffer, location, size) { gl.bindBuffer(gl.ARRAY_BUFFER, b
 function colorForHeight(height, min, max) { const t = Math.max(0, Math.min(1, (height-min)/Math.max(max-min,1))); return [0.13+0.25*t, 0.34+0.45*t, 0.32+0.45*t]; }
 function markerColor(kind) { return kind === "intro" ? [0.95,0.32,0.34] : kind === "plan" ? [0.35,0.65,0.95] : [0.98,0.78,0.25]; }
 function objectColor(kind) { return kind === "spawn" ? [0.35,0.95,0.65] : kind === "trigger" ? [0.95,0.45,0.8] : kind === "light" ? [1.0,0.78,0.25] : [0.45,0.85,1.0]; }
-function clearBuffers() { for (const b of [geometryBuffer,colorBuffer,indexBuffer,markerBuffer,markerColorBuffer,objectBuffer,objectColorBuffer,objectMeshBuffer,objectMeshColorBuffer,objectMeshIndexBuffer]) if (b) gl.deleteBuffer(b); geometryBuffer=colorBuffer=indexBuffer=markerBuffer=markerColorBuffer=objectBuffer=objectColorBuffer=objectMeshBuffer=objectMeshColorBuffer=objectMeshIndexBuffer=null; markerCount=0; indexCount=0; objectLineCount=0; objectPointCount=0; objectMeshIndexCount=0; }
+function clearBuffers() { for (const b of [geometryBuffer,colorBuffer,uvBuffer,indexBuffer,markerBuffer,markerColorBuffer,objectBuffer,objectColorBuffer,objectMeshBuffer,objectMeshColorBuffer,objectMeshIndexBuffer]) if (b) gl.deleteBuffer(b); for (const group of textureGroups) if (group.indexBuffer) gl.deleteBuffer(group.indexBuffer); for (const texture of loadedTextures.values()) gl.deleteTexture(texture); geometryBuffer=colorBuffer=uvBuffer=indexBuffer=markerBuffer=markerColorBuffer=objectBuffer=objectColorBuffer=objectMeshBuffer=objectMeshColorBuffer=objectMeshIndexBuffer=null; textureGroups=[]; loadedTextures=new Map(); markerCount=0; indexCount=0; objectLineCount=0; objectPointCount=0; objectMeshIndexCount=0; texturePreviewEl.hidden=true; texturePreviewEl.removeAttribute("src"); }
 function localPosition(x, y, z) { return [(x-model.center[0])/model.scale, (z-model.center[2])/model.scale, (y-model.center[1])/model.scale]; }
 function rawPosition(local) { return [local[0]*model.scale+model.center[0], local[2]*model.scale+model.center[1], local[1]*model.scale+model.center[2]]; }
 function mulAffine(a,b) {
@@ -359,6 +378,19 @@ function selectSraClip() {
   if (!clip) return;
   sraInfoEl.textContent=`${path} · clip ${clip.index} · ${clip.key_count} keys · ${(clip.duration_ms/1000).toFixed(2)} s · ${clip.section_count} section${clip.section_count===1?"":"s"}. Playback requires decoding the original G2 channel stream; SRL playback remains available below.`;
 }
+async function loadModelTextures(data, activeModel) {
+  const groups=textureGroups.slice();
+  for (const group of groups) {
+    try {
+      const image=await new Promise((resolve,reject)=>{ const element=new Image(); element.onload=()=>resolve(element); element.onerror=()=>reject(new Error(`could not load ${group.path}`)); element.src=`/api/texture-image?path=${encodeURIComponent(group.path)}`; });
+      if (model!==activeModel) return;
+      const texture=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,texture); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE); gl.bindTexture(gl.TEXTURE_2D,null);
+      group.texture=texture; loadedTextures.set(group.path,texture);
+      if (texturePreviewEl.hidden) { texturePreviewEl.src=`/api/texture-image?path=${encodeURIComponent(group.path)}`; texturePreviewEl.hidden=false; texturePreviewEl.alt=group.path; }
+    } catch(e) { console.warn(e); }
+  }
+  if (model===activeModel && groups.some(group=>group.texture)) statusEl.textContent=`${data.vertices.length.toLocaleString()} verts / textured SRM`;
+}
 function renderPlacementList() {
   placementsEl.innerHTML=placements.length ? placements.map((p,i)=>`<div class="placement ${i===selectedPlacement?"selected":""}" data-index="${i}"><b>${escapeHtml(p.name)}</b> <span style="color:var(--accent)">${escapeHtml(p.kind)}</span><div class="placement-pos">(${p.x}, ${p.y}, ${p.z})${p.asset?`<br>${escapeHtml(p.asset)}`:""}${p.animation?`<br>▶ ${escapeHtml(p.animation)}`:""}</div></div>`).join("") : '<div class="placement">No custom placements.</div>';
   for (const el of placementsEl.querySelectorAll(".placement[data-index]")) el.addEventListener("click",()=>selectPlacement(Number(el.dataset.index)));
@@ -391,20 +423,33 @@ function loadModel(data) {
   placements=[]; selectedPlacement=-1; placementMode=false; placeModeEl.textContent="Click to place"; renderPlacementList(); selectedMarker=-1;
   view.scale=scale; view.target=[0,0,0]; view.panX=0; view.panY=0; view.distance=2.7; view.yaw=.75; view.pitch=.7;
   const positions=[], colors=[];
-  for (const v of data.vertices) { const q=[(v[0]-cx)/scale, (v[2]-cz)/scale, (v[1]-cy)/scale]; model.localVertices.push(q); positions.push(q[0],q[1],q[2]); const c=colorForHeight(v[2],min[2],max[2]); colors.push(c[0],c[1],c[2]); }
+  const uvs=[];
+  for (let vertexIndex=0; vertexIndex<data.vertices.length; vertexIndex++) { const v=data.vertices[vertexIndex], q=[(v[0]-cx)/scale, (v[2]-cz)/scale, (v[1]-cy)/scale]; model.localVertices.push(q); positions.push(q[0],q[1],q[2]); const c=colorForHeight(v[2],min[2],max[2]); colors.push(c[0],c[1],c[2]); const uv=data.uvs?.[vertexIndex]||[0,0]; uvs.push(uv[0],uv[1]); }
   const indices=[];
   for (const f of data.faces) if (f[0]<data.vertices.length && f[1]<data.vertices.length && f[2]<data.vertices.length) indices.push(f[0],f[1],f[2]);
   indexCount=indices.length;
   geometryBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,geometryBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(positions),gl.STATIC_DRAW);
   colorBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,colorBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(colors),gl.STATIC_DRAW);
+  uvBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,uvBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(uvs),gl.STATIC_DRAW);
   indexBuffer=gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint32Array(indices),gl.STATIC_DRAW);
   // WebGL1 does not guarantee uint32 element indices. Soul Reaver area meshes are small enough for 16-bit indices.
   if (data.vertices.length > 65535) throw new Error("mesh exceeds WebGL1 index range");
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(indices),gl.STATIC_DRAW);
+  if (Array.isArray(data.texture_files) && data.texture_files.length && Array.isArray(data.material_indices)) {
+    const grouped=new Map();
+    for (let faceIndex=0; faceIndex<data.faces.length; faceIndex++) {
+      const face=data.faces[faceIndex], material=Number(data.material_indices[face[0]]||0);
+      if (!grouped.has(material)) grouped.set(material,[]);
+      const group=grouped.get(material); group.push(face[0],face[1],face[2]);
+    }
+    textureGroups=[...grouped.entries()].map(([material,groupIndices])=>({material, path:data.texture_files[material], indices:groupIndices, indexBuffer:null, texture:null})).filter(group=>group.path);
+    for (const group of textureGroups) { group.indexBuffer=gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,group.indexBuffer); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(group.indices),gl.STATIC_DRAW); }
+    void loadModelTextures(data, model);
+  }
   rebuildMarkerBuffers();
   titleEl.textContent=data.path;
   statusEl.textContent=`${data.vertices.length.toLocaleString()} verts / ${data.faces.length.toLocaleString()} faces`;
-  document.getElementById("stats").innerHTML = `<div class="stat"><span>Type</span><span>${escapeHtml(data.asset_type||"asset")}</span></div><div class="stat"><span>Vertices</span><span>${data.vertices.length.toLocaleString()}</span></div><div class="stat"><span>Faces</span><span>${data.faces.length.toLocaleString()}</span></div><div class="stat"><span>Markers</span><span>${data.markers.length.toLocaleString()}</span></div>${data.summary.bone_count?`<div class="stat"><span>Bones</span><span>${data.summary.bone_count}</span></div>`:""}<div class="stat"><span>Bounds</span><span>${min.join(", ")} → ${max.join(", ")}</span></div>`;
+  document.getElementById("stats").innerHTML = `<div class="stat"><span>Type</span><span>${escapeHtml(data.asset_type||"asset")}</span></div><div class="stat"><span>Vertices</span><span>${data.vertices.length.toLocaleString()}</span></div><div class="stat"><span>Faces</span><span>${data.faces.length.toLocaleString()}</span></div><div class="stat"><span>Markers</span><span>${data.markers.length.toLocaleString()}</span></div>${data.summary.bone_count?`<div class="stat"><span>Bones</span><span>${data.summary.bone_count}</span></div>`:""}${textureGroups.length?`<div class="stat"><span>Textures</span><span>${textureGroups.length}</span></div>`:""}<div class="stat"><span>Bounds</span><span>${min.join(", ")} → ${max.join(", ")}</span></div>`;
   renderMarkerList();
   updateAssetControls();
 }
@@ -417,6 +462,17 @@ function updateAssetControls() {
   if (model && !isScene) writeStatusEl.textContent = "PCM object loaded. Direct marker writes apply to scene assets only.";
 }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+function drawMainGeometry() {
+  for (const group of textureGroups) {
+    if (!group.texture) continue;
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,group.texture); gl.uniform1i(textureLoc,0); gl.uniform1i(useTextureLoc,1); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,group.indexBuffer); gl.drawElements(gl.TRIANGLES,group.indices.length,gl.UNSIGNED_SHORT,0);
+  }
+  // Draw a color fallback after textured groups. With the default LESS depth
+  // test, already-textured fragments reject this identical-depth pass while
+  // groups whose images are still loading remain visible.
+  gl.uniform1i(useTextureLoc,0); putAttribute(geometryBuffer,positionLoc,3); putAttribute(colorBuffer,colorLoc,3); putAttribute(uvBuffer,uvLoc,2); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.drawElements(gl.TRIANGLES,indexCount,gl.UNSIGNED_SHORT,0);
+  gl.uniform1i(useTextureLoc,0); gl.bindTexture(gl.TEXTURE_2D,null);
+}
 function render() {
   const now=performance.now(), delta=Math.min(0.1,(now-lastAnimationTimestamp)/1000); lastAnimationTimestamp=now;
   if (animationPlayingEl.checked && placements.some(p=>p.animation)) {
@@ -425,11 +481,11 @@ function render() {
     if (frame!==lastAnimationFrame) { lastAnimationFrame=frame; rebuildPlacementBuffers(); }
   }
   resize(); gl.enable(gl.DEPTH_TEST); gl.clearColor(.025,.045,.08,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT); if (!model) { requestAnimationFrame(render); return; }
-  gl.useProgram(program); gl.uniformMatrix4fv(matrixLoc,false,matrix()); putAttribute(geometryBuffer,positionLoc,3); putAttribute(colorBuffer,colorLoc,3); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.drawElements(gl.TRIANGLES,indexCount,gl.UNSIGNED_SHORT,0);
-  if (wireToggle.checked) { gl.disable(gl.DEPTH_TEST); gl.lineWidth(1); gl.drawElements(gl.LINE_STRIP,indexCount,gl.UNSIGNED_SHORT,0); gl.enable(gl.DEPTH_TEST); }
+  gl.useProgram(program); gl.uniformMatrix4fv(matrixLoc,false,matrix()); drawMainGeometry();
+  if (wireToggle.checked) { gl.disable(gl.DEPTH_TEST); gl.lineWidth(1); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.drawElements(gl.LINE_STRIP,indexCount,gl.UNSIGNED_SHORT,0); gl.enable(gl.DEPTH_TEST); }
   if (markersToggle.checked && markerCount) { gl.disable(gl.DEPTH_TEST); putAttribute(markerBuffer,positionLoc,3); putAttribute(markerColorBuffer,colorLoc,3); gl.drawArrays(gl.POINTS,0,markerCount); gl.enable(gl.DEPTH_TEST); }
-  if (objectLineCount) { gl.disable(gl.DEPTH_TEST); putAttribute(objectBuffer,positionLoc,3); putAttribute(objectColorBuffer,colorLoc,3); gl.drawArrays(gl.LINES,0,objectLineCount); gl.drawArrays(gl.POINTS,objectLineCount,objectPointCount); gl.enable(gl.DEPTH_TEST); }
-  if (objectMeshIndexCount) { putAttribute(objectMeshBuffer,positionLoc,3); putAttribute(objectMeshColorBuffer,colorLoc,3); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,objectMeshIndexBuffer); gl.drawElements(gl.TRIANGLES,objectMeshIndexCount,gl.UNSIGNED_SHORT,0); }
+  if (objectLineCount) { gl.disable(gl.DEPTH_TEST); gl.uniform1i(useTextureLoc,0); gl.disableVertexAttribArray(uvLoc); gl.vertexAttrib2f(uvLoc,0,0); putAttribute(objectBuffer,positionLoc,3); putAttribute(objectColorBuffer,colorLoc,3); gl.drawArrays(gl.LINES,0,objectLineCount); gl.drawArrays(gl.POINTS,objectLineCount,objectPointCount); gl.enable(gl.DEPTH_TEST); }
+  if (objectMeshIndexCount) { gl.uniform1i(useTextureLoc,0); gl.disableVertexAttribArray(uvLoc); gl.vertexAttrib2f(uvLoc,0,0); putAttribute(objectMeshBuffer,positionLoc,3); putAttribute(objectMeshColorBuffer,colorLoc,3); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,objectMeshIndexBuffer); gl.drawElements(gl.TRIANGLES,objectMeshIndexCount,gl.UNSIGNED_SHORT,0); }
   requestAnimationFrame(render);
 }
 async function fetchJson(url) { const r=await fetch(url); if (!r.ok) throw new Error(await r.text()); return await r.json(); }
@@ -458,7 +514,9 @@ placeModeEl.addEventListener("click",()=>{placementMode=!placementMode;placeMode
 document.getElementById("deletePlacement").addEventListener("click",()=>{if(selectedPlacement<0)return;placements.splice(selectedPlacement,1);selectedPlacement=Math.min(selectedPlacement,placements.length-1);if(selectedPlacement>=0)selectPlacement(selectedPlacement);else{rebuildPlacementBuffers();renderPlacementList();}updateAssetControls();});
 [objectTypeEl,objectAssetEl,animationAssetEl,objectNameEl,objectXEl,objectYEl,objectZEl].forEach(el=>el.addEventListener("input",writePlacementFromForm));
 objectAssetEl.addEventListener("change",writePlacementFromForm); animationAssetEl.addEventListener("change",writePlacementFromForm);
-animationPlayingEl.addEventListener("change",()=>{lastAnimationFrame=-1;});
+function updateAnimationToggleLabel() { animationToggleEl.textContent=animationPlayingEl.checked?"Pause SRL playback":"Play SRL playback"; }
+animationPlayingEl.addEventListener("change",()=>{lastAnimationFrame=-1;updateAnimationToggleLabel();});
+animationToggleEl.addEventListener("click",()=>{animationPlayingEl.checked=!animationPlayingEl.checked;lastAnimationFrame=-1;updateAnimationToggleLabel();});
 animationSpeedEl.addEventListener("input",()=>{animationSpeedValueEl.textContent=`${Number(animationSpeedEl.value).toFixed(1)}×`;lastAnimationFrame=-1;});
 sraAssetEl.addEventListener("change",()=>void loadSraArchive(sraAssetEl.value));
 sraClipEl.addEventListener("change",selectSraClip);
@@ -474,7 +532,7 @@ canvas.addEventListener("pointerdown",e=>{dragMoved=false;drag={x:e.clientX,y:e.
 canvas.addEventListener("pointerup",e=>{drag=null;canvas.classList.remove("dragging");canvas.releasePointerCapture(e.pointerId);});
 canvas.addEventListener("pointermove",e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>3)dragMoved=true;drag.x=e.clientX;drag.y=e.clientY;if(drag.pan){view.panX-=dx*.004*view.distance;view.panY+=dy*.004*view.distance;}else{view.yaw-=dx*.008;view.pitch=Math.max(-1.45,Math.min(1.45,view.pitch-dy*.008));}});
 canvas.addEventListener("wheel",e=>{e.preventDefault();view.distance=Math.max(.2,Math.min(30,view.distance*Math.exp(e.deltaY*.001)));},{passive:false});
-window.addEventListener("resize",resize); init(); requestAnimationFrame(render);
+window.addEventListener("resize",resize); updateAnimationToggleLabel(); init(); requestAnimationFrame(render);
 </script>
 </body>
 </html>
