@@ -198,11 +198,18 @@ def extract(
     catalog_path: Path | None = None,
     as_pcm: bool = False,
     limit: int | None = None,
+    area: str | None = None,
 ) -> list[dict[str, object]]:
     bigfile = _find_bigfile(source)
     catalog_data, catalog_origin = locate_catalog(source, catalog_path)
     records = parse_catalog(catalog_data)
-    selected = [record for record in records if _matches(record, selectors)]
+    area_token = f"/area/{area.lower().strip('/')}/" if area else None
+    selected = [
+        record
+        for record in records
+        if _matches(record, selectors)
+        and (area_token is None or area_token in record.path.lower())
+    ]
     if limit is not None:
         selected = selected[:limit]
     if not selected:
@@ -260,10 +267,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, help="limit the number of extracted records")
     args = parser.parse_args(argv)
     selectors = list(args.select)
-    if args.area:
-        selectors.append(f"*/area/{args.area}/*")
     try:
-        files = extract(args.source, args.output, selectors, args.catalog, args.pcm, args.limit)
+        files = extract(args.source, args.output, selectors, args.catalog, args.pcm, args.limit, args.area)
     except (OSError, ValueError, FileNotFoundError) as exc:
         parser.error(str(exc))
     print(f"Extracted {len(files)} file(s) to {args.output}")
