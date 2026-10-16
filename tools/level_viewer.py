@@ -174,15 +174,29 @@ def _terrain_geometry(path: Path) -> dict[str, object]:
         struct.unpack_from("<HHH", data, module_offset + face_relative + index * 12)
         for index in range(face_count)
     ]
-    return {
+    marker_warning = None
+    try:
+        markers = [marker.__dict__ for marker in _parse_scene_markers(path)]
+    except (ValueError, struct.error) as exc:
+        # Early prototype scenes can use a different marker-table layout while
+        # retaining the same terrain/geometry header.  Keep those scenes
+        # visible in the viewer and expose the limitation to callers instead
+        # of misclassifying them as standalone object PCMs.
+        markers = []
+        marker_warning = str(exc)
+
+    result = {
         "format": "soul-re-view-v1",
         "asset_type": "drm",
         "path": path.as_posix(),
         "summary": _parse_drm(path).__dict__,
         "vertices": vertices,
         "faces": faces,
-        "markers": [marker.__dict__ for marker in _parse_scene_markers(path)],
+        "markers": markers,
     }
+    if marker_warning:
+        result["marker_warning"] = marker_warning
+    return result
 
 
 def _geometry(path: Path) -> dict[str, object]:
