@@ -169,6 +169,36 @@ COMPARISON_OPCODES = {
     "execute_equals",
 }
 
+# Logical button bits produced by PSXPAD_TranslateData in GAMEPAD.c.  These
+# are the values consumed by ATTR_KEYPAD (not the raw active-low PSX packet).
+KEYPAD_BUTTONS = {
+    0x0001: "Up",
+    0x0002: "Down",
+    0x0004: "Left",
+    0x0008: "Right",
+    0x0010: "Triangle",
+    0x0020: "Square",
+    0x0040: "Circle",
+    0x0080: "Cross/X",
+    0x0100: "L1",
+    0x0200: "R1",
+    0x0400: "L2",
+    0x0800: "R2",
+    0x1000: "L3",
+    0x2000: "R3",
+    0x4000: "Start",
+    0x8000: "Select",
+}
+
+
+def _keypad_button_names(mask: int) -> list[str]:
+    """Return logical controller names for an ATTR_KEYPAD mask."""
+    names = [name for bit, name in KEYPAD_BUTTONS.items() if mask & bit]
+    unknown = mask & ~sum(KEYPAD_BUTTONS)
+    if unknown:
+        names.append(f"unknown 0x{unknown:X}")
+    return names
+
 
 def _attribute_names() -> dict[int, str]:
     """Read the authoritative ATTR_ENUM names from the checked-in header."""
@@ -232,6 +262,7 @@ def _annotate_script(script: dict[str, Any], is_condition: bool = False) -> None
     last_object_token: dict[str, Any] | None = None
     voice_indices: list[int] = []
     sound_numbers: list[int] = []
+    keypad_masks: list[int] = []
     player_movement = False
     tokens = script["tokens"]
     for token_index, token in enumerate(tokens):
@@ -259,6 +290,12 @@ def _annotate_script(script: dict[str, Any], is_condition: bool = False) -> None
             if attr == "ATTR_VOICEPLAY" and next_token and next_token.get("opcode") == "push_number":
                 token["value_hint"] = next_token.get("operand")
                 voice_indices.append(next_token.get("operand"))
+            elif attr == "ATTR_KEYPAD" and next_token and next_token.get("opcode") == "push_number":
+                mask = next_token.get("operand")
+                if isinstance(mask, int):
+                    token["keypad_mask_hint"] = mask
+                    token["keypad_buttons"] = _keypad_button_names(mask)
+                    keypad_masks.append(mask)
             elif attr == "ATTR_SOUND" and next_token:
                 # ATTR_SOUND consumes one raw short directly in the C parser,
                 # so it is not encoded as a normal push_number opcode.
@@ -279,12 +316,23 @@ def _annotate_script(script: dict[str, Any], is_condition: bool = False) -> None
         script["voice_indices"] = voice_indices
     if sound_numbers:
         script["sound_numbers"] = sound_numbers
+    if keypad_masks:
+        script["keypad_masks"] = keypad_masks
+        script["keypad_buttons"] = [
+            {"mask": mask, "hex": f"0x{mask:X}", "buttons": _keypad_button_names(mask)}
+            for mask in keypad_masks
+        ]
     script["human_summary"] = _semantic_description(flags, is_condition=is_condition)
     details: list[str] = []
     if voice_indices:
         details.append("voice index/indices: " + ", ".join(str(value) for value in voice_indices))
     if sound_numbers:
         details.append("instance sound number(s): " + ", ".join(str(value) for value in sound_numbers))
+    if keypad_masks:
+        details.extend(
+            f"keypad mask 0x{mask:X} (" + ", ".join(_keypad_button_names(mask)) + ")"
+            for mask in keypad_masks
+        )
     if details:
         script["human_summary"] += " " + "; ".join(details) + "."
 
@@ -516,6 +564,9 @@ class EventReader:
                                 evidence.append(f"calls event {target['event_number']}")
                         elif attr in ATTRIBUTE_SEMANTICS["movement"] and token.get("target_opcode") == "player_object":
                             evidence.append(f"player movement via {attr}")
+                    for keypad in script.get("keypad_buttons", []):
+                        names = ", ".join(keypad["buttons"])
+                        evidence.append(f"requires keypad mask {keypad['hex']} ({names})")
                 action_entry["evidence"] = list(dict.fromkeys(evidence))
                 if evidence:
                     action_entry["human_summary"] += " Evidence: " + "; ".join(dict.fromkeys(evidence)) + "."
