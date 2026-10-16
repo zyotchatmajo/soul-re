@@ -179,9 +179,12 @@ def _matches(record: CatalogRecord, selectors: list[str]) -> bool:
 
 def _output_relative(record: CatalogRecord, as_pcm: bool) -> Path:
     relative = Path(*record.path.lstrip("/").split("/"))
-    # Drop the early build's \kain2 prefix and keep an AREA/OBJECT-compatible
-    # tree.  Other assets remain under their original game-relative path.
+    # Drop the early build's \kain2\area prefix so the output directory is a
+    # direct remaster AREA root (MRLOCK/BIN/...).  Other virtual roots keep a
+    # useful game-relative layout after dropping only \kain2.
     if relative.parts and relative.parts[0].lower() == "kain2":
+        relative = Path(*relative.parts[1:])
+    if relative.parts and relative.parts[0].lower() == "area":
         relative = Path(*relative.parts[1:])
     if as_pcm and relative.suffix.lower() == ".drm":
         relative = relative.with_suffix(".pcm")
