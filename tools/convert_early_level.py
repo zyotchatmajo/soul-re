@@ -128,6 +128,108 @@ def scene_info(path: Path, early: bool) -> dict[str, int | str]:
     }
 
 
+def copy_early_bsp(
+    template: bytearray,
+    early: bytes,
+    early_module: int,
+    early_terrain: int,
+    template_module: int,
+    early_face_rel: int,
+    early_face_count: int,
+    new_face_rel: int,
+) -> tuple[int, int, int, list[int]]:
+    """Append the prototype BSP graph and retarget its serialized pointers.
+
+    Prototype Terrain has two extra fields before ``numBSPTrees`` (the count
+    is at +0x4c, array at +0x50), while the remaster has those fields at
+    +0x44/+0x48.  The node/leaf graph itself uses the native 0x2c/0x30/0x24
+    record sizes, so it can be copied as one contiguous block once all graph
+    pointers and face-list pointers are translated.
+    """
+    count = i32(early, early_terrain + 0x4C)
+    array_rel = u32(early, early_terrain + 0x50)
+    if count <= 0 or count > 0x1000 or not array_rel:
+        raise ValueError("early scene has no recognizable BSP tree array")
+
+    trees: list[tuple[int, int, int]] = []
+    for index in range(count):
+        tree = early_module + array_rel + index * 0x24
+        if tree + 0x24 > len(early):
+            raise ValueError("early BSP tree array extends outside scene")
+        root, start_leaves, end_leaves = struct.unpack_from("<III", early, tree)
+        if not (root <= start_leaves <= end_leaves):
+            raise ValueError("early BSP tree ranges are invalid")
+        trees.append((root, start_leaves, end_leaves))
+
+    old_start = min(array_rel, *(root for root, _, _ in trees))
+    old_end = max(array_rel + count * 0x24, *(end for _, _, end in trees))
+    if old_start >= old_end or early_module + old_end > len(early):
+        raise ValueError("early BSP graph extends outside scene")
+
+    new_rel = align(len(template) - template_module, 4)
+    absolute = template_module + new_rel
+    if len(template) < absolute:
+        template.extend(b"\0" * (absolute - len(template)))
+    template.extend(early[early_module + old_start : early_module + old_end])
+
+    def translate(value: int) -> int:
+        if old_start <= value < old_end:
+            return new_rel + (value - old_start)
+        return value
+
+    extra_relocs: list[int] = []
+    # Tree graph pointers: root, leaf ranges, and optional instance spline.
+    tree_copy_base = new_rel + (array_rel - old_start)
+    for index in range(count):
+        tree = template_module + tree_copy_base + index * 0x24
+        for field in (0x00, 0x04, 0x08, 0x20):
+            value = u32(template, tree + field)
+            if value:
+                struct.pack_into("<I", template, tree + field, translate(value))
+                extra_relocs.append(tree_copy_base + index * 0x24 + field)
+
+    patched_faces = 0
+    face_end = early_face_rel + early_face_count * 0x0C
+    for root, start_leaves, end_leaves in trees:
+        node_rel = root
+        while node_rel < start_leaves:
+            node = template_module + new_rel + (node_rel - old_start)
+            for field in (0x14, 0x18):
+                value = u32(template, node + field)
+                if value:
+                    struct.pack_into("<I", template, node + field, translate(value))
+                    extra_relocs.append(new_rel + (node_rel - old_start) + field)
+            node_rel += 0x2C
+        leaf_rel = start_leaves
+        while leaf_rel < end_leaves:
+            leaf = template_module + new_rel + (leaf_rel - old_start)
+            face_rel = u32(template, leaf + 0x08)
+            if early_face_rel <= face_rel < face_end:
+                struct.pack_into("<I", template, leaf + 0x08, new_face_rel + (face_rel - early_face_rel))
+                patched_faces += 1
+                extra_relocs.append(new_rel + (leaf_rel - old_start) + 0x08)
+            leaf_rel += 0x30
+
+    return new_rel, count, patched_faces, extra_relocs
+
+
+def rebuild_relocation_table(data: bytearray, module_offset: int, extra: list[int]) -> bytearray:
+    """Prepend an expanded relocation table while preserving module bytes."""
+    if not extra:
+        return data
+    old_count = u32(data, 0)
+    existing = [u32(data, 4 + index * 4) for index in range(old_count)]
+    entries = existing + sorted(set(extra))
+    table_words = ((len(entries) + 512) // 512) * 512
+    new_module_offset = table_words * 4
+    module = bytes(data[module_offset:])
+    header = bytearray(new_module_offset)
+    struct.pack_into("<I", header, 0, len(entries))
+    for index, value in enumerate(entries):
+        struct.pack_into("<I", header, 4 + index * 4, value)
+    return header + module
+
+
 def convert(
     early_path: Path,
     template_path: Path,
@@ -137,6 +239,7 @@ def convert(
     in_place_native: bool = False,
     world_name: str | None = None,
     stream_unit_id: int | None = None,
+    copy_early_bsp_graph: bool = False,
 ) -> dict[str, object]:
     early = early_path.read_bytes()
     template = bytearray(template_path.read_bytes())
@@ -271,6 +374,19 @@ def convert(
         appended[name] = rel
         template.extend(arrays[name])
 
+    early_bsp: tuple[int, int, int, list[int]] | None = None
+    if copy_early_bsp_graph:
+        early_bsp = copy_early_bsp(
+            template,
+            early,
+            early_module,
+            early_terrain,
+            template_module,
+            early_ptrs["faces"],
+            early_counts["faces"],
+            appended["faces"],
+        )
+
     # The native BSP leaves contain their own face-list pointers.  Redirect
     # those pointers when they point into the wrapper's original face array;
     # otherwise collision/render traversal would still index the discarded
@@ -280,7 +396,7 @@ def convert(
     bsp_count = i32(template, template_terrain + 0x44)
     bsp_array_rel = u32(template, template_terrain + 0x48)
     patched_leaf_faces = 0
-    if bsp_count >= 0 and bsp_count < 0x10000 and bsp_array_rel:
+    if not copy_early_bsp_graph and bsp_count >= 0 and bsp_count < 0x10000 and bsp_array_rel:
         old_face_end = old_face_rel + old_face_count * 0x0C
         for tree_index in range(bsp_count):
             tree = template_module + bsp_array_rel + tree_index * 0x24
@@ -302,6 +418,11 @@ def convert(
                     patched_leaf_faces += 1
                 leaf_rel += 0x30
 
+    if early_bsp is not None:
+        bsp_rel, bsp_count, patched_early_faces, extra_relocs = early_bsp
+        struct.pack_into("<i", template, template_terrain + 0x44, bsp_count)
+        struct.pack_into("<I", template, template_terrain + 0x48, bsp_rel)
+
     # Native remaster Terrain fields: counts at 0x10/0x14/0x18 and pointers at
     # 0x1c/0x20/0x24.  Keep its BSP/texture/event structures coherent with the
     # wrapper; the geometry arrays are the only transplanted data in this pass.
@@ -310,6 +431,9 @@ def convert(
     for field, offset in (("vertices", 0x1C), ("faces", 0x20), ("normals", 0x24)):
         struct.pack_into("<I", template, template_terrain + offset, appended[field])
 
+    if early_bsp is not None:
+        template = rebuild_relocation_table(template, template_module, extra_relocs)
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(template)
     return {
@@ -317,7 +441,7 @@ def convert(
         "input_template": str(template_path),
         "output": str(output_path),
         "early_module_offset": early_module,
-        "template_module_offset": template_module,
+        "template_module_offset": module_offset(template)[0],
         "early_relocation_count": early_relocs,
         "template_relocation_count": template_relocs,
         "early_terrain_relative": early_terrain_rel,
@@ -327,6 +451,8 @@ def convert(
         "output_size": len(template),
         "patched_bsp_leaf_face_pointers": patched_leaf_faces,
         "mode": "topology-preserving" if preserve_template_topology else "geometry-wrapper",
+        "copied_early_bsp_graph": copy_early_bsp_graph,
+        "patched_early_bsp_leaf_face_pointers": patched_early_faces if early_bsp is not None else 0,
         "world_name": world_name,
         "stream_unit_id": stream_unit_id,
     }
@@ -354,6 +480,11 @@ def main() -> int:
     )
     parser.add_argument("--world-name", help="replace the template Level.worldName string")
     parser.add_argument("--stream-unit-id", type=int, help="replace the template Level.streamUnitID")
+    parser.add_argument(
+        "--copy-early-bsp",
+        action="store_true",
+        help="copy the prototype BSP node/leaf graph and retarget its face lists",
+    )
     args = parser.parse_args()
     for path in (args.early, args.template):
         if not path.is_file():
@@ -367,6 +498,7 @@ def main() -> int:
         in_place_native=args.in_place_native,
         world_name=args.world_name,
         stream_unit_id=args.stream_unit_id,
+        copy_early_bsp_graph=args.copy_early_bsp,
     )
     print(json.dumps(result, indent=2))
     return 0
