@@ -130,6 +130,16 @@ def remap_face_material_offsets(
     return bytes(result), changed
 
 
+def build_morph_normal_indices(face_blob: bytes) -> bytes:
+    """Create a no-op morph-normal backup array for the converted faces."""
+    if len(face_blob) % 0x0C:
+        raise ValueError("face blob is not aligned to TFace records")
+    result = bytearray((len(face_blob) // 0x0C) * 2)
+    for index, offset in enumerate(range(0, len(face_blob), 0x0C)):
+        struct.pack_into("<h", result, index * 2, struct.unpack_from("<h", face_blob, offset + 0x08)[0])
+    return bytes(result)
+
+
 def scene_info(path: Path, early: bool) -> dict[str, int | str]:
     data = path.read_bytes()
     module, reloc_count = module_offset(data)
@@ -469,6 +479,29 @@ def convert(
         appended[name] = rel
         template.extend(arrays[name])
 
+    native_counts = {
+        "vertices": i32(template, template_terrain + 0x10),
+        "faces": i32(template, template_terrain + 0x14),
+        "normals": i32(template, template_terrain + 0x18),
+    }
+    resized_morph_data = output_counts != native_counts
+    if resized_morph_data:
+        # The native morph-color and morph-delta lists are sized for the
+        # wrapper's original arrays.  Leaving them attached makes spectral
+        # updates walk past the converted geometry.  A face-normal backup is
+        # still required by MORPH_UpdateNormals, so provide a same-value,
+        # no-op list sized to the replacement face array.
+        struct.pack_into("<I", template, template_terrain + 0x3C, 0)
+        struct.pack_into("<I", template, template_terrain + 0x40, 0)
+        morph_normals = build_morph_normal_indices(arrays["faces"])
+        rel = align(len(template) - template_module, 4)
+        absolute = template_module + rel
+        if len(template) < absolute:
+            template.extend(b"\0" * (absolute - len(template)))
+        appended["morph_normals"] = rel
+        template.extend(morph_normals)
+        struct.pack_into("<I", template, template_terrain + 0x4C, rel)
+
     early_bsp: tuple[int, int, int, list[int]] | None = None
     if copy_early_bsp_graph:
         early_bsp = copy_early_bsp(
@@ -562,6 +595,7 @@ def convert(
         "world_name": world_name,
         "stream_unit_id": stream_unit_id,
         "remapped_material_offsets": remapped_materials,
+        "resized_morph_data": resized_morph_data,
     }
 
 
