@@ -230,6 +230,59 @@ def rebuild_relocation_table(data: bytearray, module_offset: int, extra: list[in
     return header + module
 
 
+def rebalance_native_bsp(
+    template: bytearray,
+    template_module: int,
+    template_terrain: int,
+    face_relative: int,
+    face_count: int,
+    vertices: bytes,
+) -> int:
+    """Keep the PC BSP graph but distribute the replacement faces across it."""
+    count = i32(template, template_terrain + 0x44)
+    array_rel = u32(template, template_terrain + 0x48)
+    if count <= 0 or count > 0x1000 or not array_rel:
+        raise ValueError("template has no recognizable BSP tree array")
+    points = [struct.unpack_from("<hhh", vertices, index) for index in range(0, len(vertices), 0x0C)]
+    mins = tuple(min(point[axis] for point in points) for axis in range(3))
+    maxs = tuple(max(point[axis] for point in points) for axis in range(3))
+    center = tuple((mins[axis] + maxs[axis]) // 2 for axis in range(3))
+    box = (*mins, *maxs)
+    leaves: list[int] = []
+    nodes: list[int] = []
+    for tree_index in range(count):
+        tree = template_module + array_rel + tree_index * 0x24
+        root, start_leaves, end_leaves = struct.unpack_from("<III", template, tree)
+        node_rel = root
+        while node_rel < start_leaves:
+            nodes.append(node_rel)
+            node_rel += 0x2C
+        leaf_rel = start_leaves
+        while leaf_rel < end_leaves:
+            leaves.append(leaf_rel)
+            leaf_rel += 0x30
+    if not leaves:
+        raise ValueError("template BSP contains no leaves")
+
+    base, remainder = divmod(face_count, len(leaves))
+    cursor = 0
+    for index, leaf_rel in enumerate(leaves):
+        leaf = template_module + leaf_rel
+        amount = base + (1 if index < remainder else 0)
+        struct.pack_into("<I", template, leaf + 0x08, face_relative + cursor * 0x0C)
+        struct.pack_into("<h", template, leaf + 0x0C, amount)
+        struct.pack_into("<hhhhhh", template, leaf + 0x10, *box)
+        struct.pack_into("<hhhhhh", template, leaf + 0x1C, *box)
+        struct.pack_into("<hhhH", template, leaf, *center, 0xFFFF)
+        struct.pack_into("<hhhH", template, leaf + 0x28, *center, 0xFFFF)
+        cursor += amount
+    for node_rel in nodes:
+        node = template_module + node_rel
+        struct.pack_into("<hhhH", template, node, *center, 0xFFFF)
+        struct.pack_into("<hhhH", template, node + 0x1C, *center, 0xFFFF)
+    return len(leaves)
+
+
 def convert(
     early_path: Path,
     template_path: Path,
@@ -240,6 +293,7 @@ def convert(
     world_name: str | None = None,
     stream_unit_id: int | None = None,
     copy_early_bsp_graph: bool = False,
+    rebalance_bsp: bool = False,
 ) -> dict[str, object]:
     early = early_path.read_bytes()
     template = bytearray(template_path.read_bytes())
@@ -422,6 +476,17 @@ def convert(
         bsp_rel, bsp_count, patched_early_faces, extra_relocs = early_bsp
         struct.pack_into("<i", template, template_terrain + 0x44, bsp_count)
         struct.pack_into("<I", template, template_terrain + 0x48, bsp_rel)
+    if rebalance_bsp:
+        if copy_early_bsp_graph:
+            raise ValueError("--rebalance-native-bsp cannot be combined with --copy-early-bsp")
+        rebalance_native_bsp(
+            template,
+            template_module,
+            template_terrain,
+            appended["faces"],
+            output_counts["faces"],
+            arrays["vertices"],
+        )
 
     # Native remaster Terrain fields: counts at 0x10/0x14/0x18 and pointers at
     # 0x1c/0x20/0x24.  Keep its BSP/texture/event structures coherent with the
@@ -485,6 +550,11 @@ def main() -> int:
         action="store_true",
         help="copy the prototype BSP node/leaf graph and retarget its face lists",
     )
+    parser.add_argument(
+        "--rebalance-native-bsp",
+        action="store_true",
+        help="keep the native BSP graph but distribute converted faces and widen its bounds",
+    )
     args = parser.parse_args()
     for path in (args.early, args.template):
         if not path.is_file():
@@ -499,6 +569,7 @@ def main() -> int:
         world_name=args.world_name,
         stream_unit_id=args.stream_unit_id,
         copy_early_bsp_graph=args.copy_early_bsp,
+        rebalance_bsp=args.rebalance_native_bsp,
     )
     print(json.dumps(result, indent=2))
     return 0
