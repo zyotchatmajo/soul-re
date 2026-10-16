@@ -81,7 +81,12 @@ def scene_info(path: Path, early: bool) -> dict[str, int | str]:
     }
 
 
-def convert(early_path: Path, template_path: Path, output_path: Path) -> dict[str, object]:
+def convert(
+    early_path: Path,
+    template_path: Path,
+    output_path: Path,
+    preserve_template_topology: bool = False,
+) -> dict[str, object]:
     early = early_path.read_bytes()
     template = bytearray(template_path.read_bytes())
     early_module, early_relocs = module_offset(early)
@@ -112,6 +117,38 @@ def convert(early_path: Path, template_path: Path, output_path: Path) -> dict[st
         "faces": checked_span(early, early_module + early_ptrs["faces"], early_counts["faces"], 0x0C, "early face"),
         "normals": checked_span(early, early_module + early_ptrs["normals"], early_counts["normals"], 0x08, "early normal"),
     }
+
+    output_counts = dict(early_counts)
+    if preserve_template_topology:
+        # Keep the remaster's fixed face/normal topology and BSP partitioning.
+        # Only replace the first native vertex-count positions with prototype
+        # positions; this isolates count/face-layout incompatibilities.
+        native_counts = {
+            "vertices": i32(template, template_terrain + 0x10),
+            "faces": i32(template, template_terrain + 0x14),
+            "normals": i32(template, template_terrain + 0x18),
+        }
+        native_vertex_rel = u32(template, template_terrain + 0x1C)
+        native_face_rel = u32(template, template_terrain + 0x20)
+        native_normal_rel = u32(template, template_terrain + 0x24)
+        native_vertices = checked_span(
+            template, template_module + native_vertex_rel, native_counts["vertices"], 0x0C, "template vertex"
+        )
+        native_faces = checked_span(
+            template, template_module + native_face_rel, native_counts["faces"], 0x0C, "template face"
+        )
+        native_normals = checked_span(
+            template, template_module + native_normal_rel, native_counts["normals"], 0x08, "template normal"
+        )
+        vertex_bytes = bytearray(native_vertices)
+        copy_size = min(len(vertex_bytes), len(arrays["vertices"]))
+        vertex_bytes[:copy_size] = arrays["vertices"][:copy_size]
+        arrays = {
+            "vertices": bytes(vertex_bytes),
+            "faces": native_faces,
+            "normals": native_normals,
+        }
+        output_counts = native_counts
 
     # Append aligned arrays to the existing native module.  The wrapper's
     # relocation entries already include the three native Terrain pointer
@@ -160,7 +197,7 @@ def convert(early_path: Path, template_path: Path, output_path: Path) -> dict[st
     # 0x1c/0x20/0x24.  Keep its BSP/texture/event structures coherent with the
     # wrapper; the geometry arrays are the only transplanted data in this pass.
     for field, offset in (("vertices", 0x10), ("faces", 0x14), ("normals", 0x18)):
-        struct.pack_into("<i", template, template_terrain + offset, early_counts[field])
+        struct.pack_into("<i", template, template_terrain + offset, output_counts[field])
     for field, offset in (("vertices", 0x1C), ("faces", 0x20), ("normals", 0x24)):
         struct.pack_into("<I", template, template_terrain + offset, appended[field])
 
@@ -176,11 +213,11 @@ def convert(early_path: Path, template_path: Path, output_path: Path) -> dict[st
         "template_relocation_count": template_relocs,
         "early_terrain_relative": early_terrain_rel,
         "template_terrain_relative": template_terrain_rel,
-        "counts": early_counts,
+        "counts": output_counts,
         "appended_relative": appended,
         "output_size": len(template),
         "patched_bsp_leaf_face_pointers": patched_leaf_faces,
-        "mode": "geometry-wrapper",
+        "mode": "topology-preserving" if preserve_template_topology else "geometry-wrapper",
     }
 
 
@@ -189,11 +226,21 @@ def main() -> int:
     parser.add_argument("--early", type=Path, required=True, help="early prototype .pcm/.drm scene")
     parser.add_argument("--template", type=Path, required=True, help="matching remaster-native .drm scene")
     parser.add_argument("--output", type=Path, required=True, help="new converted scene")
+    parser.add_argument(
+        "--preserve-template-topology",
+        action="store_true",
+        help="keep native face/normal counts and BSP topology; replace vertex positions only",
+    )
     args = parser.parse_args()
     for path in (args.early, args.template):
         if not path.is_file():
             parser.error(f"file not found: {path}")
-    result = convert(args.early, args.template, args.output)
+    result = convert(
+        args.early,
+        args.template,
+        args.output,
+        preserve_template_topology=args.preserve_template_topology,
+    )
     print(json.dumps(result, indent=2))
     return 0
 
