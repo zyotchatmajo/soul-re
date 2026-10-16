@@ -289,7 +289,7 @@ function skinnedVertex(object, index, animation, frameIndex) {
   let result=[0,0,0], total=0;
   for (let j=0;j<indices.length;j++) {
     const bone=indices[j], weight=Number(weights[j]||0)/255;
-    if (!weight || bone>=deltas.length || bone>=object.bone_matrices.length) continue;
+    if (!weight || bone>=deltas.length) continue;
     const delta=deltas[bone];
     const q=transformPoint(delta,p); result[0]+=q[0]*weight; result[1]+=q[1]*weight; result[2]+=q[2]*weight; total+=weight;
   }
@@ -386,8 +386,7 @@ function selectSraClip() {
   sraInfoEl.textContent=`${path} · clip ${clip.index} · decoding ${clip.key_count} keys…`;
   void (async()=>{
     try {
-      const segments=Number(model?.summary?.bone_count||32);
-      const decoded=await fetchJson(`/api/sra-frames?path=${encodeURIComponent(path)}&clip=${clip.index}&segments=${segments}`);
+      const decoded=await fetchJson(`/api/sra-frames?path=${encodeURIComponent(path)}&clip=${clip.index}`);
       if (sraAssetEl.value!==path || Number(sraClipEl.value)!==clip.index) return;
       sraAnimation=decoded; sraFrame=0; sraPlaying=false; sraPlayEl.disabled=false; sraPlayEl.textContent="Play SRA clip"; sraPlayEl.title="Start SRA playback";
       rebuildMainGeometryFrame(0);
@@ -469,7 +468,7 @@ function loadModel(data) {
   if (Array.isArray(data.texture_files) && data.texture_files.length && Array.isArray(data.material_indices)) {
     const grouped=new Map();
     for (let faceIndex=0; faceIndex<data.faces.length; faceIndex++) {
-      const face=data.faces[faceIndex], material=Number(data.material_indices[face[0]]||0);
+      const face=data.faces[faceIndex], material=Math.max(0,Number(data.material_indices[face[0]]||1)-1);
       if (!grouped.has(material)) grouped.set(material,[]);
       const group=grouped.get(material); group.push(face[0],face[1],face[2]);
     }

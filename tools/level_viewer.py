@@ -262,10 +262,19 @@ def _srm_geometry(path: Path) -> dict[str, object]:
     if extra_bone_count > 128:
         raise ValueError(f"SRM extra bone count is unreasonable: {extra_bone_count}")
     bone_count = 32 + extra_bone_count
-    bone_matrices = [
-        struct.unpack_from("<12f", data, offset + index * 48)
-        for index in range(bone_count)
-    ]
+    # The remaster calls these 48-byte records "bones", but each record is
+    # actually four packed segment-origin vectors (4 x float3), not a 3x4
+    # matrix.  Keeping them as positions is important: SRM vertex influences
+    # use the original segment numbers, which can be greater than the number
+    # of 48-byte records.
+    segment_positions: list[tuple[float, float, float]] = []
+    bone_matrices = []
+    for index in range(bone_count):
+        values = struct.unpack_from("<12f", data, offset + index * 48)
+        bone_matrices.append(values)
+        segment_positions.extend(
+            (tuple(values[start : start + 3]) for start in range(0, 12, 3))
+        )
     skip(bone_count * 48, "bone matrices")
     if offset + 4 > len(data):
         raise ValueError("SRM bone transform check is outside the file")
@@ -299,8 +308,12 @@ def _srm_geometry(path: Path) -> dict[str, object]:
     for _ in range(vertex_count):
         x, y, z = struct.unpack_from("<3f", data, offset)
         material_indices.append(data[offset + 19])
+        # SRM vertices use three bone indices, one packed U coordinate, three
+        # normalized bone weights, and one packed V coordinate.  The UV bytes
+        # sit between the index and weight triplets; treating V as a weight
+        # makes animated meshes shear and stretch noticeably.
         vertex_bone_indices = tuple(data[offset + 20 : offset + 23])
-        vertex_bone_weights = tuple(data[offset + 25 : offset + 28])
+        vertex_bone_weights = tuple(data[offset + 24 : offset + 27])
         uvs.append((data[offset + 23] / 255.0, 1.0 - data[offset + 27] / 255.0))
         offset += 32
         if not all(math.isfinite(value) for value in (x, y, z)):
@@ -333,6 +346,7 @@ def _srm_geometry(path: Path) -> dict[str, object]:
         "texture_files": [f"{name}_D.DDS" for name in texture_names],
         "extra_bone_count": extra_bone_count,
         "bone_count": bone_count,
+        "segment_position_count": len(segment_positions),
         "vertex_count": vertex_count,
         "face_count": face_count // 3,
         "bounds_min": tuple(bounds_min),
@@ -346,6 +360,7 @@ def _srm_geometry(path: Path) -> dict[str, object]:
         "vertices": vertices,
         "faces": faces,
         "bone_matrices": bone_matrices,
+        "segment_positions": segment_positions,
         "bone_indices": bone_indices,
         "bone_weights": bone_weights,
         "material_indices": material_indices,
@@ -567,15 +582,117 @@ def _sra_rotation_matrix(rotation: tuple[float, float, float]) -> tuple[float, .
     )
 
 
+def _pcm_skeleton(path: Path) -> dict[str, object] | None:
+    """Read the original PCM model's segment hierarchy when it is available.
+
+    Remaster SRM vertex influences retain the original segment numbers (they
+    can be larger than the compact SRM matrix array), while SRA channels are
+    indexed by that same G2 segment list.  The PCM is therefore the reliable
+    source for parent links and default segment translations.
+    """
+    try:
+        data = path.read_bytes()
+        module_offset, _ = _module_offset(data)
+        module_size = len(data) - module_offset
+        if module_size < 0x10:
+            return None
+
+        def u32(relative: int) -> int:
+            if relative < 0 or relative + 4 > module_size:
+                raise ValueError("PCM skeleton field is outside the module")
+            return struct.unpack_from("<I", data, module_offset + relative)[0]
+
+        def checked(relative: int, size: int) -> None:
+            if relative <= 0 or relative + size > module_size:
+                raise ValueError("PCM skeleton array is outside the module")
+
+        model_count = struct.unpack_from("<H", data, module_offset + 0x08)[0]
+        model_list = u32(0x0C)
+        if model_count < 1 or model_count > 64:
+            return None
+        checked(model_list, model_count * 4)
+        model_relative = u32(model_list)
+        if model_relative + 0x38 > module_size:
+            return None
+        segment_count = u32(model_relative + 0x18)
+        segment_list = u32(model_relative + 0x1C)
+        if not 1 <= segment_count <= 256:
+            return None
+        checked(segment_list, segment_count * 0x18)
+        parents: list[int] = []
+        positions: list[tuple[float, float, float]] = []
+        for index in range(segment_count):
+            relative = module_offset + segment_list + index * 0x18
+            px, py, pz, parent = struct.unpack_from("<hhhH", data, relative + 0x0C)
+            parent = parent if parent != 0xFFFF else -1
+            if parent >= segment_count:
+                parent = -1
+            parents.append(parent)
+            positions.append((float(px), float(py), float(pz)))
+        return {"segment_count": segment_count, "parents": parents, "positions": positions}
+    except (OSError, ValueError, struct.error):
+        return None
+
+
+def _sra_companion_skeleton(path: Path) -> dict[str, object] | None:
+    stem = path.stem
+    candidates = [path.parent / stem / f"{stem}.PCM", path.parent / f"{stem}.PCM"]
+    for candidate in candidates:
+        if candidate.is_file():
+            skeleton = _pcm_skeleton(candidate)
+            if skeleton is not None:
+                for srm_candidate in (
+                    candidate.parent / f"{stem}_1.SRM",
+                    candidate.parent / f"{stem}.SRM",
+                    candidate.parent.parent / f"{stem}_1.SRM",
+                    candidate.parent.parent / f"{stem}.SRM",
+                ):
+                    if srm_candidate.is_file():
+                        try:
+                            srm = _srm_geometry(srm_candidate)
+                            positions = srm.get("segment_positions")
+                            if isinstance(positions, list) and len(positions) >= int(skeleton["segment_count"]):
+                                skeleton["bind_positions"] = positions
+                                skeleton["bind_space"] = "srm"
+                                break
+                        except (OSError, ValueError, struct.error):
+                            pass
+                return skeleton
+    # The extracted object tree is case-sensitive on some platforms.  Keep
+    # the fallback bounded to the SRA's directory rather than scanning AREA.
+    lowered = stem.lower()
+    for candidate in path.parent.rglob("*.PCM"):
+        if candidate.stem.lower() == lowered:
+            skeleton = _pcm_skeleton(candidate)
+            if skeleton is not None:
+                return skeleton
+    return None
+
+
+def _mul_affine(a: tuple[float, ...], b: tuple[float, ...]) -> tuple[float, ...]:
+    return (
+        a[0] * b[0] + a[1] * b[4] + a[2] * b[8],
+        a[0] * b[1] + a[1] * b[5] + a[2] * b[9],
+        a[0] * b[2] + a[1] * b[6] + a[2] * b[10],
+        a[0] * b[3] + a[1] * b[7] + a[2] * b[11] + a[3],
+        a[4] * b[0] + a[5] * b[4] + a[6] * b[8],
+        a[4] * b[1] + a[5] * b[5] + a[6] * b[9],
+        a[4] * b[2] + a[5] * b[6] + a[6] * b[10],
+        a[4] * b[3] + a[5] * b[7] + a[6] * b[11] + a[7],
+        a[8] * b[0] + a[9] * b[4] + a[10] * b[8],
+        a[8] * b[1] + a[9] * b[5] + a[10] * b[9],
+        a[8] * b[2] + a[9] * b[6] + a[10] * b[10],
+        a[8] * b[3] + a[9] * b[7] + a[10] * b[11] + a[11],
+    )
+
+
 def _sra_animation_frames(path: Path, clip_index: int, segment_count: int | None = None) -> dict[str, object]:
     """Decode one SRA clip into frame-major affine matrices for the viewer.
 
-    The original runtime applies these values to its segment hierarchy.  The
-    viewer's SRM skinning data has no portable parent table, so this endpoint
-    emits per-segment local transforms; the browser then uses frame-zero as the
-    bind pose and applies the animated delta to weighted vertices.  Static
-    channels are preserved, while missing/unsupported channels retain G2's
-    identity defaults.
+    The original runtime applies these values to the companion PCM segment
+    hierarchy.  We reconstruct those parent-composed world matrices here; the
+    browser then uses frame-zero as the bind pose and applies the animated
+    delta to weighted SRM vertices.
     """
     catalog = _sra_animation_catalog(path)
     clips = catalog["clips"]
@@ -591,8 +708,9 @@ def _sra_animation_frames(path: Path, clip_index: int, segment_count: int | None
         raise ValueError("SRA clip has no channel section")
     key_count = int(clip["key_count"])
     active_bits = int(clip["flags"])
+    skeleton = _sra_companion_skeleton(path)
     if segment_count is None:
-        segment_count = 32
+        segment_count = int(skeleton["segment_count"]) if skeleton else 32
     segment_count = max(1, min(int(segment_count), 128))
     channels = _sra_flag_channels(data, module_offset, int(clip["flags_offset"]), active_bits, segment_count)
     blocks = _sra_stream_blocks(
@@ -605,7 +723,24 @@ def _sra_animation_frames(path: Path, clip_index: int, segment_count: int | None
     # only rotations use G2's fixed 4096-unit angle conversion.
     rotations = [[[0.0, 0.0, 0.0] for _ in range(segment_count)] for _ in range(key_count)]
     scales = [[[1.0, 1.0, 1.0] for _ in range(segment_count)] for _ in range(key_count)]
-    translations = [[[0.0, 0.0, 0.0] for _ in range(segment_count)] for _ in range(key_count)]
+    bind_positions = skeleton.get("bind_positions") if skeleton else None
+    bind_space = skeleton.get("bind_space") if skeleton else None
+    if not isinstance(bind_positions, list) or len(bind_positions) < segment_count:
+        bind_positions = skeleton["positions"] if skeleton else [(0.0, 0.0, 0.0)] * segment_count
+        bind_space = "pcm"
+    parents = skeleton["parents"] if skeleton else [-1] + [index - 1 for index in range(1, segment_count)]
+    default_positions = []
+    for index in range(segment_count):
+        parent = int(parents[index]) if index < len(parents) else -1
+        current = bind_positions[index]
+        if 0 <= parent < segment_count:
+            ancestor = bind_positions[parent]
+            default_positions.append((current[0] - ancestor[0], current[1] - ancestor[1], current[2] - ancestor[2]))
+        else:
+            default_positions.append(tuple(current))
+    translations = [
+        [list(default_positions[index]) for index in range(segment_count)] for _ in range(key_count)
+    ]
     decoded_channels = min(len(channels), len(blocks))
     for channel, values in zip(channels[:decoded_channels], blocks[:decoded_channels]):
         group, segment, component = channel
@@ -616,20 +751,26 @@ def _sra_animation_frames(path: Path, clip_index: int, segment_count: int | None
                 # Remaster scale channels use the same 4096 baseline as G2.
                 scales[frame][segment][component] = value / 4096.0
             else:
-                translations[frame][segment][component] = value
+                # SRM segment origins are stored as the central-inverted
+                # coordinates of the original PCM hierarchy.
+                translations[frame][segment][component] = -value if bind_space == "srm" else value
 
     frames: list[list[tuple[float, ...]]] = []
     for frame_index in range(key_count):
-        frame: list[tuple[float, ...]] = []
+        local: list[tuple[float, ...]] = []
         for segment in range(segment_count):
             r = _sra_rotation_matrix(tuple(rotations[frame_index][segment]))
             sx, sy, sz = scales[frame_index][segment]
             tx, ty, tz = translations[frame_index][segment]
-            frame.append((
+            local.append((
                 r[0] * sx, r[1] * sy, r[2] * sz, tx,
                 r[3] * sx, r[4] * sy, r[5] * sz, ty,
                 r[6] * sx, r[7] * sy, r[8] * sz, tz,
             ))
+        frame = []
+        for segment, local_matrix in enumerate(local):
+            parent = int(parents[segment]) if segment < len(parents) else -1
+            frame.append(_mul_affine(frame[parent], local_matrix) if 0 <= parent < segment else local_matrix)
         frames.append(frame)
     warning = None
     if len(channels) != len(blocks):
@@ -642,6 +783,7 @@ def _sra_animation_frames(path: Path, clip_index: int, segment_count: int | None
             "clip_index": clip_index,
             "frame_count": key_count,
             "segment_count": segment_count,
+            "hierarchy_source": "companion PCM + SRM segment origins" if bind_space == "srm" else ("companion PCM" if skeleton else "identity fallback"),
             "time_per_key": int(clip["time_per_key"]),
             "duration_ms": int(clip["duration_ms"]),
             "active_channel_bits": active_bits,
