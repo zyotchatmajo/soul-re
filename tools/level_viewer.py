@@ -11,6 +11,7 @@ import json
 import math
 import os
 import shutil
+import secrets
 import struct
 import sys
 import tempfile
@@ -23,20 +24,40 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 
 try:  # direct ``python tools/level_viewer.py`` invocation
     from level_editor import (
+        _apply_managed_scene_placements,
         _append_scene_placements,
+        _append_object_names,
+        _apply_scene_lights,
+        _collect_scene_identifiers,
+        _compare_stream_portals,
         _module_offset,
+        _parse_bsp_roots,
         _parse_drm,
         _parse_scene_markers,
+        _parse_scene_objects,
+        _parse_scene_lights,
+        _parse_stream_portals,
         _patch_scene,
+        _scene_alignment_report,
     )
     from event_extractor import EventReader
 except ModuleNotFoundError:  # imported as ``tools.level_viewer``
     from tools.level_editor import (
+        _apply_managed_scene_placements,
         _append_scene_placements,
+        _append_object_names,
+        _apply_scene_lights,
+        _collect_scene_identifiers,
+        _compare_stream_portals,
         _module_offset,
+        _parse_bsp_roots,
         _parse_drm,
         _parse_scene_markers,
+        _parse_scene_objects,
+        _parse_scene_lights,
+        _parse_stream_portals,
         _patch_scene,
+        _scene_alignment_report,
     )
     from tools.event_extractor import EventReader
 
@@ -58,6 +79,8 @@ def _patch_events(source: Path, payload: dict[str, object], destination: Path) -
     events = report.get("events")
     if not isinstance(events, list):
         raise ValueError("event report is malformed")
+    if not events or "module_offset" not in report:
+        raise ValueError("asset contains no editable event table")
     event_by_index = {int(event["index"]): event for event in events if isinstance(event, dict)}
     patches = payload.get("patches")
     if not isinstance(patches, list):
@@ -65,6 +88,30 @@ def _patch_events(source: Path, payload: dict[str, object], destination: Path) -
     data = bytearray(source.read_bytes())
     module_offset = int(report["module_offset"])
     changed = 0
+
+    def event_shape(value: dict[str, object]) -> tuple[object, ...]:
+        shape: list[object] = []
+        for event in value.get("events", []):
+            if not isinstance(event, dict):
+                continue
+            actions_shape: list[object] = []
+            for action in event.get("actions", []):
+                if not isinstance(action, dict):
+                    continue
+                actions_shape.append(
+                    (
+                        int(action.get("relative_offset", -1)),
+                        tuple(
+                            (name, int((action.get(name) or {}).get("size_words", -1)))
+                            for name in ("condition", "action")
+                            if isinstance(action.get(name), dict)
+                        ),
+                    )
+                )
+            shape.append((int(event.get("index", -1)), int(event.get("relative_offset", -1)), tuple(actions_shape)))
+        return tuple(shape)
+
+    original_shape = event_shape(report)
 
     def short_value(value: object, label: str) -> int:
         if isinstance(value, bool) or not isinstance(value, int) or not -32768 <= value <= 32767:
@@ -117,27 +164,112 @@ def _patch_events(source: Path, payload: dict[str, object], destination: Path) -
         elif kind == "puppet_state":
             write_u8(event_relative + 5, byte_value(patch.get("value"), "puppet state"))
         elif kind == "script_word":
-            action_index = patch.get("action_index")
-            if isinstance(action_index, bool) or not isinstance(action_index, int) or action_index < 0:
-                raise ValueError("action_index must be a non-negative integer")
-            script_name = patch.get("script")
-            if script_name not in {"condition", "action"}:
-                raise ValueError("script must be 'condition' or 'action'")
-            actions = event.get("actions")
-            if not isinstance(actions, list) or action_index >= len(actions):
-                raise ValueError(f"unknown action index {action_index} in event {event_index}")
-            action = actions[action_index]
-            script = action.get(script_name) if isinstance(action, dict) else None
-            if not isinstance(script, dict):
-                raise ValueError("selected event line has no requested script")
-            word_index = patch.get("word_index")
-            if isinstance(word_index, bool) or not isinstance(word_index, int) or not 0 <= word_index < int(script["size_words"]):
-                raise ValueError("word_index is outside the selected script")
-            write_i16(int(script["data_relative_offset"]) + word_index * 2, short_value(patch.get("value"), "script word"))
+            raise ValueError(
+                "script-word event editing is disabled until the complete opcode and stack validator is available"
+            )
         else:
             raise ValueError(f"unsupported event patch kind: {kind}")
     destination.write_bytes(data)
+    try:
+        written_report = _event_report(destination)
+    except Exception as exc:
+        raise ValueError(f"event output failed to parse: {exc}") from exc
+    if event_shape(written_report) != original_shape:
+        raise ValueError("event write changed event or script structure unexpectedly")
     return changed
+
+
+# --- Remaster terrain texture mapping -------------------------------------
+# Verified against the installed Steam sr1.dll (see docs/REMASTER_MODDING.md):
+# * The TextureFT3 word at +2 (the PS1 CLUT field) holds a 13-bit HD texture
+#   slot; the loader (sr1.dll 0x113550) masks it with 0x1FFF.
+# * Two slots are remapped when the triangle's minimum U and V are both 0
+#   (table at sr1.dll 0x22B200).
+# * A slot is resolved through the texture archives in load order; each
+#   archive owns ``pages`` slots and the next archive's index continues at
+#   ``slot - pages + 2`` (sr1.dll 0xB5BF).  MOVIES/BONUS rows are offset by
+#   2000/4000 in TEX_HD.MAP (sr1.dll 0xB63B).
+# * A TEX_HD.MAP row is 16 uint32 tile ids for one 256x256-texel page laid out
+#   as a 4x4 grid of 64x64-texel tiles in COLUMN-major order
+#   (index = (u >> 6) * 4 + (v >> 6)); validated against the BIG low-res pages.
+# * Tile id ``v`` names ``<v>>4>_<v&15>.DDS``; ids >= 0x7D00 live in ``M\``
+#   and ids >= 0xFA00 in ``B\`` after subtracting that base (sr1.dll 0xB670).
+TEXTURE_SLOT_MASK = 0x1FFF
+TEXTURE_SLOT_OVERRIDES = {762: (640, 0, 0), 928: (640, 0, 0)}
+TEXTURE_MAP_ENTRIES = 320 * 300
+TEXTURE_ARCHIVES = (("TEXTURES.BIG", 0, 1287), ("MOVIES.BIG", 2000, 29), ("BONUS.BIG", 4000, 268), ("E3.BIG", 0, 178))
+_TEXTURE_MAP_CACHE: dict[tuple[str, int], tuple[int, ...]] = {}
+
+
+def _load_texture_map(path: Path) -> tuple[int, ...] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    key = (str(path), stat.st_mtime_ns)
+    cached = _TEXTURE_MAP_CACHE.get(key)
+    if cached is not None:
+        return cached
+    data = path.read_bytes()
+    if len(data) != TEXTURE_MAP_ENTRIES * 4:
+        return None
+    table = struct.unpack(f"<{TEXTURE_MAP_ENTRIES}I", data)
+    _TEXTURE_MAP_CACHE.clear()
+    _TEXTURE_MAP_CACHE[key] = table
+    return table
+
+
+def _texture_archive_layout(install_root: Path | None) -> list[tuple[str, int, int]]:
+    """Return (archive, TEX_HD.MAP row offset, page count) in load order."""
+    layout = []
+    for name, row_offset, default_pages in TEXTURE_ARCHIVES:
+        pages = default_pages
+        if install_root is not None:
+            try:
+                size = (install_root / name).stat().st_size
+            except OSError:
+                size = None
+            if size is not None and size >= 0x1000 and (size - 0x1000) % 0x20000 == 0:
+                pages = (size - 0x1000) // 0x20000
+        layout.append((name, row_offset, pages))
+    return layout
+
+
+def _texture_slot_location(slot: int, layout: list[tuple[str, int, int]]) -> tuple[str, int, int] | None:
+    """Resolve a slot to (archive, page within archive, TEX_HD.MAP row)."""
+    remaining = slot
+    for name, row_offset, pages in layout:
+        if remaining < pages:
+            return name, remaining, row_offset + remaining
+        remaining = remaining - pages + 2
+    return None
+
+
+def _texture_tile_name(value: int) -> str | None:
+    if value == 0xFFFFFFFF:
+        return None
+    if value >= 0xFA00:
+        value -= 0xFA00
+        return f"B/{value >> 4}_{value & 0x0F}.DDS"
+    if value >= 0x7D00:
+        value -= 0x7D00
+        return f"M/{value >> 4}_{value & 0x0F}.DDS"
+    return f"{value >> 4}_{value & 0x0F}.DDS"
+
+
+def _texture_slot_tiles(texture_map: tuple[int, ...], row: int) -> list[str | None]:
+    if row < 0 or (row + 1) * 16 > len(texture_map):
+        return [None] * 16
+    return [_texture_tile_name(value) for value in texture_map[row * 16 : row * 16 + 16]]
+
+
+def _terrain_texture_slot(record: bytes) -> int:
+    u0, v0, clut, u1, v1, _tpage, u2, v2, _attr = struct.unpack_from("<BBHBBHBBH", record)
+    slot = clut & TEXTURE_SLOT_MASK
+    override = TEXTURE_SLOT_OVERRIDES.get(slot)
+    if override is not None and min(u0, u1, u2) == override[1] and min(v0, v1, v2) == override[2]:
+        slot = override[0]
+    return slot
 
 
 def _terrain_geometry(path: Path) -> dict[str, object]:
@@ -159,6 +291,8 @@ def _terrain_geometry(path: Path) -> dict[str, object]:
     face_count = i32(terrain_relative + 0x14)
     vertex_relative = u32(terrain_relative + 0x1C)
     face_relative = u32(terrain_relative + 0x20)
+    texture_start_relative = u32(terrain_relative + 0x34)
+    texture_end_relative = u32(terrain_relative + 0x38)
     if vertex_count < 0 or face_count < 0:
         raise ValueError("DRM contains a negative geometry count")
     if vertex_relative + vertex_count * 12 > module_size:
@@ -174,6 +308,81 @@ def _terrain_geometry(path: Path) -> dict[str, object]:
         struct.unpack_from("<HHH", data, module_offset + face_relative + index * 12)
         for index in range(face_count)
     ]
+    # Terrain UVs are not stored on TVertex.  Each TFace carries a byte offset
+    # into TextureFT3 (three UV pairs plus a PS1 texture-page ID), so shared
+    # terrain vertices can legitimately have different UVs on adjacent faces.
+    # Keep the original indexed geometry for picking/collision display, and
+    # expose per-face UVs/material pages for the WebGL renderer to expand.
+    face_uvs: list[list[tuple[float, float]]] = []
+    face_material_indices: list[int] = []
+    texture_files: list[str] = []
+    texture_refs: dict[str, int] = {}
+    texture_urls: list[str] = []
+    texture_atlases: list[dict[str, object]] = []
+    texture_map: tuple[int, ...] | None = None
+    texture_map_path: Path | None = None
+    for candidate in (
+        path.parents[2] / "TEX_HD.MAP" if len(path.parents) > 2 else path.parent / "TEX_HD.MAP",
+        path.parent / "TEX_HD.MAP",
+        path.parent.parent / "TEX_HD.MAP",
+    ):
+        texture_map = _load_texture_map(candidate)
+        if texture_map is not None:
+            texture_map_path = candidate
+            break
+    archive_layout = _texture_archive_layout(texture_map_path.parent.parent if texture_map_path else None)
+
+    texture_span_valid = (
+        texture_start_relative < module_size
+        and texture_end_relative <= module_size
+        and texture_end_relative >= texture_start_relative
+        and (texture_end_relative - texture_start_relative) % 12 == 0
+    )
+    texture_span = (texture_end_relative - texture_start_relative) if texture_span_valid else 0
+    for index in range(face_count):
+        face_absolute = module_offset + face_relative + index * 12
+        textoff = struct.unpack_from("<H", data, face_absolute + 10)[0]
+        if textoff == 0xFFFF or not texture_span_valid or textoff % 12 or textoff + 12 > texture_span:
+            face_uvs.append([(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)])
+            face_material_indices.append(-1)
+            continue
+        texture_absolute = module_offset + texture_start_relative + textoff
+        record = bytes(data[texture_absolute : texture_absolute + 12])
+        u0, v0, _clut, u1, v1, _tpage, u2, v2, _attr = struct.unpack_from("<BBHBBHBBH", record)
+        # UVs are texel coordinates inside the slot's 256x256 page; the
+        # viewer uploads the composed atlas with UNPACK_FLIP_Y, hence 1 - v.
+        face_uvs.append([
+            ((u0 + 0.5) / 256.0, 1.0 - (v0 + 0.5) / 256.0),
+            ((u1 + 0.5) / 256.0, 1.0 - (v1 + 0.5) / 256.0),
+            ((u2 + 0.5) / 256.0, 1.0 - (v2 + 0.5) / 256.0),
+        ])
+        if texture_map is None:
+            face_material_indices.append(-1)
+            continue
+        slot = _terrain_texture_slot(record)
+        material = texture_refs.get(str(slot))
+        if material is None:
+            location = _texture_slot_location(slot, archive_layout)
+            tiles = _texture_slot_tiles(texture_map, location[2]) if location else [None] * 16
+            if not any(tiles):
+                texture_refs[str(slot)] = -1
+                face_material_indices.append(-1)
+                continue
+            material = len(texture_files)
+            texture_refs[str(slot)] = material
+            label = f"slot {slot}" + (f" ({location[0]} page {location[1]})" if location else "")
+            texture_files.append(label)
+            texture_urls.append("/api/terrain-atlas?tiles=" + ",".join(quote(tile or "") for tile in tiles))
+            texture_atlases.append(
+                {
+                    "slot": slot,
+                    "archive": location[0] if location else None,
+                    "page": location[1] if location else None,
+                    "map_row": location[2] if location else None,
+                    "tiles": tiles,
+                }
+            )
+        face_material_indices.append(material)
     marker_warning = None
     try:
         markers = [marker.__dict__ for marker in _parse_scene_markers(path)]
@@ -184,6 +393,34 @@ def _terrain_geometry(path: Path) -> dict[str, object]:
         # of misclassifying them as standalone object PCMs.
         markers = []
         marker_warning = str(exc)
+    try:
+        scene_objects = _parse_scene_objects(path)
+    except (ValueError, struct.error) as exc:
+        scene_objects = []
+        object_warning = str(exc)
+    else:
+        object_warning = None
+    try:
+        scene_lights = _parse_scene_lights(path)
+    except (ValueError, struct.error) as exc:
+        scene_lights = []
+        light_warning = str(exc)
+    else:
+        light_warning = None
+    try:
+        portals = _parse_stream_portals(path)
+    except (ValueError, struct.error) as exc:
+        portals = []
+        portal_warning = str(exc)
+    else:
+        portal_warning = None
+    try:
+        bsp_roots = _parse_bsp_roots(path)
+    except (ValueError, struct.error) as exc:
+        bsp_roots = []
+        bsp_warning = str(exc)
+    else:
+        bsp_warning = None
 
     result = {
         "format": "soul-re-view-v1",
@@ -192,10 +429,29 @@ def _terrain_geometry(path: Path) -> dict[str, object]:
         "summary": _parse_drm(path).__dict__,
         "vertices": vertices,
         "faces": faces,
+        "face_uvs": face_uvs,
+        "face_material_indices": face_material_indices,
+        "texture_files": texture_files,
+        "texture_urls": texture_urls,
+        "texture_atlases": texture_atlases,
         "markers": markers,
+        "scene_objects": scene_objects,
+        "scene_lights": scene_lights,
+        "portals": portals,
+        "bsp_roots": bsp_roots,
     }
     if marker_warning:
         result["marker_warning"] = marker_warning
+    if object_warning:
+        result["object_warning"] = object_warning
+    if light_warning:
+        result["light_warning"] = light_warning
+    if portal_warning:
+        result["portal_warning"] = portal_warning
+    if bsp_warning:
+        result["bsp_warning"] = bsp_warning
+    if texture_map is None:
+        result["texture_warning"] = "TEX_HD.MAP was not found beside this area; terrain textures remain unavailable."
     return result
 
 
@@ -211,6 +467,22 @@ def _geometry(path: Path) -> dict[str, object]:
         return _pcm_geometry(path)
     result["asset_type"] = "pcm-level"
     return result
+
+
+def _companion_asset_warning(root: Path, relative_path: str) -> str | None:
+    """Warn when a scene has both DRM and PCM copies with the same stem."""
+    requested = Path(relative_path)
+    if requested.suffix.lower() not in {".drm", ".pcm"}:
+        return None
+    companion = requested.with_suffix(".pcm" if requested.suffix.lower() == ".drm" else ".drm")
+    source = root / requested
+    other = root / companion
+    if source.is_file() and other.is_file():
+        return (
+            f"Both {requested.name} and {companion.name} exist. Confirm which companion "
+            "the runtime loads before applying edits."
+        )
+    return None
 
 
 def _pcm_geometry(path: Path) -> dict[str, object]:
@@ -564,7 +836,10 @@ def _sra_animation_catalog(path: Path) -> dict[str, object]:
         return struct.unpack_from("<I", data, module_offset + relative)[0]
 
     def checked_pointer(value: int, label: str) -> int:
-        if value == 0 or value >= module_size:
+        # A few retail archives terminate the final section at the exact end
+        # of the relocatable module.  That is a valid empty/tail pointer, not
+        # an out-of-bounds read; callers still validate any bytes they consume.
+        if value == 0 or value > module_size:
             raise ValueError(f"SRA {label} pointer is outside the module")
         return value
 
@@ -984,6 +1259,36 @@ def _safe_sra_asset(root: Path | None, requested: str) -> Path:
     return candidate
 
 
+_ATLAS_CACHE: dict[tuple[tuple[str, int] | None, ...], bytes] = {}
+
+
+def _terrain_atlas_png(sources: list[Path | None], tile_size: int, image_module) -> bytes:
+    """Compose one slot's 16 HD tiles into a column-major 4x4 PNG atlas."""
+    keys: list[tuple[str, int] | None] = []
+    for source in sources:
+        keys.append(None if source is None else (str(source), source.stat().st_mtime_ns))
+    cache_key = tuple(keys) + ((str(tile_size), tile_size),)
+    cached = _ATLAS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    atlas = image_module.new("RGBA", (tile_size * 4, tile_size * 4), (128, 128, 128, 255))
+    for index, source in enumerate(sources):
+        if source is None:
+            continue
+        with image_module.open(source) as tile:
+            tile = tile.convert("RGBA")
+            if tile.size != (tile_size, tile_size):
+                tile = tile.resize((tile_size, tile_size), image_module.Resampling.LANCZOS)
+            atlas.paste(tile, ((index // 4) * tile_size, (index % 4) * tile_size))
+    output = io.BytesIO()
+    atlas.save(output, format="PNG")
+    payload = output.getvalue()
+    if len(_ATLAS_CACHE) >= 64:
+        _ATLAS_CACHE.pop(next(iter(_ATLAS_CACHE)))
+    _ATLAS_CACHE[cache_key] = payload
+    return payload
+
+
 def _safe_texture_asset(root: Path | None, requested: str) -> Path:
     if root is None:
         raise FileNotFoundError("texture root is not configured")
@@ -1012,6 +1317,22 @@ class ViewerHandler(BaseHTTPRequestHandler):
     write_root: Path | None = None
     default_asset: str = ""
     html: bytes
+    write_token: str = ""
+    write_lock = threading.Lock()
+
+    def _authorize_write(self) -> None:
+        """Require the viewer's session token and same-origin local host."""
+        token = self.headers.get("X-Soul-Re-Token", "")
+        if not self.write_token or not secrets.compare_digest(token, self.write_token):
+            raise PermissionError("missing or invalid editor write token")
+        host = self.headers.get("Host", "").split(":", 1)[0].strip("[]").lower()
+        if host not in {"127.0.0.1", "localhost", "::1"}:
+            raise PermissionError("write requests must come from the local viewer")
+        origin = self.headers.get("Origin")
+        if origin:
+            origin_host = urlparse(origin).hostname
+            if origin_host not in {"127.0.0.1", "localhost", "::1"}:
+                raise PermissionError("cross-origin editor writes are not allowed")
 
     def log_message(self, format: str, *args: object) -> None:
         # Keep the terminal useful: API errors are still reported, routine
@@ -1031,6 +1352,9 @@ class ViewerHandler(BaseHTTPRequestHandler):
         self._send(status, "application/json; charset=utf-8", json.dumps(value).encode("utf-8"))
 
     def _request_json(self) -> dict[str, object]:
+        content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json":
+            raise PermissionError("write requests must use Content-Type: application/json")
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0 or length > 8 * 1024 * 1024:
             raise ValueError("request body must be between 1 byte and 8 MiB")
@@ -1057,7 +1381,55 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 requested = parse_qs(parsed.query).get("path", [self.default_asset])[0]
                 if not requested:
                     raise ValueError("missing DRM/PCM path")
-                self._json(HTTPStatus.OK, _geometry(_safe_asset(self.root, requested)))
+                source = _safe_asset(self.root, requested)
+                result = _geometry(source)
+                result["source_sha1"] = _sha1(source)
+                warning = _companion_asset_warning(self.root, requested)
+                if warning:
+                    result["companion_warning"] = warning
+                self._json(HTTPStatus.OK, result)
+                return
+            if parsed.path == "/api/portals":
+                requested = parse_qs(parsed.query).get("path", [self.default_asset])[0]
+                if not requested:
+                    raise ValueError("missing DRM/PCM path")
+                source = _safe_asset(self.root, requested)
+                if source.suffix.lower() not in {".drm", ".pcm"}:
+                    raise ValueError("portal inspection requires a DRM or PCM scene")
+                self._json(
+                    HTTPStatus.OK,
+                    {"format": "soul-re-portals-v1", "path": source.as_posix(), "portals": _parse_stream_portals(source)},
+                )
+                return
+            if parsed.path == "/api/portal-compare":
+                query = parse_qs(parsed.query)
+                left_requested = query.get("left", [""])[0]
+                right_requested = query.get("right", [""])[0]
+                if not left_requested or not right_requested:
+                    raise ValueError("portal comparison requires left and right paths")
+                left = _safe_asset(self.root, left_requested)
+                right = _safe_asset(self.root, right_requested)
+                self._json(HTTPStatus.OK, _compare_stream_portals(left, right))
+                return
+            if parsed.path == "/api/bsp":
+                requested = parse_qs(parsed.query).get("path", [self.default_asset])[0]
+                if not requested:
+                    raise ValueError("missing DRM/PCM path")
+                source = _safe_asset(self.root, requested)
+                self._json(
+                    HTTPStatus.OK,
+                    {"format": "soul-re-bsp-v1", "path": source.as_posix(), "roots": _parse_bsp_roots(source)},
+                )
+                return
+            if parsed.path == "/api/scene-align":
+                query = parse_qs(parsed.query)
+                left_requested = query.get("left", [""])[0]
+                right_requested = query.get("right", [""])[0]
+                if not left_requested or not right_requested:
+                    raise ValueError("scene alignment requires left and right paths")
+                left = _safe_asset(self.root, left_requested)
+                right = _safe_asset(self.root, right_requested)
+                self._json(HTTPStatus.OK, _scene_alignment_report(left, right))
                 return
             if parsed.path == "/api/events":
                 requested = parse_qs(parsed.query).get("path", [self.default_asset])[0]
@@ -1135,6 +1507,28 @@ class ViewerHandler(BaseHTTPRequestHandler):
                     ),
                 )
                 return
+            if parsed.path == "/api/terrain-atlas":
+                query = parse_qs(parsed.query)
+                tiles = query.get("tiles", [""])[0].split(",")
+                if len(tiles) != 16:
+                    raise ValueError("terrain atlas needs exactly 16 tile entries")
+                try:
+                    tile_size = int(query.get("size", ["256"])[0])
+                except ValueError as exc:
+                    raise ValueError("atlas size must be an integer") from exc
+                if tile_size not in {64, 128, 256, 512}:
+                    raise ValueError("atlas size must be 64, 128, 256 or 512")
+                sources = [_safe_texture_asset(self.texture_root, unquote(tile)) if tile else None for tile in tiles]
+                try:
+                    from PIL import Image
+                except ImportError:
+                    self._json(
+                        HTTPStatus.NOT_IMPLEMENTED,
+                        {"error": "texture preview requires Pillow; install it with `python -m pip install Pillow`"},
+                    )
+                    return
+                self._send(HTTPStatus.OK, "image/png", _terrain_atlas_png(sources, tile_size, Image))
+                return
             if parsed.path == "/api/texture-image":
                 requested = parse_qs(parsed.query).get("path", [""])[0]
                 if not requested:
@@ -1143,7 +1537,11 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 try:
                     from PIL import Image
                 except ImportError as exc:
-                    raise RuntimeError("texture preview requires Pillow (pip install Pillow)") from exc
+                    self._json(
+                        HTTPStatus.NOT_IMPLEMENTED,
+                        {"error": "texture preview requires Pillow; install it with `python -m pip install Pillow`"},
+                    )
+                    return
                 with Image.open(source) as image:
                     image.thumbnail((4096, 4096), Image.Resampling.LANCZOS)
                     output = io.BytesIO()
@@ -1160,6 +1558,8 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 )
                 return
             self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"not found\n")
+        except PermissionError as exc:
+            self._json(HTTPStatus.FORBIDDEN, {"error": str(exc)})
         except FileNotFoundError as exc:
             self._json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
         except (ValueError, struct.error) as exc:
@@ -1176,6 +1576,7 @@ class ViewerHandler(BaseHTTPRequestHandler):
             if self.write_root is None:
                 self._json(HTTPStatus.CONFLICT, {"error": "direct writes are disabled; restart with --write-root"})
                 return
+            self._authorize_write()
             payload = self._request_json()
             requested = payload.get("path")
             markers = payload.get("markers")
@@ -1184,6 +1585,29 @@ class ViewerHandler(BaseHTTPRequestHandler):
             source = _safe_asset(self.root, requested)
             target = _safe_target(self.write_root, requested)
             before_sha1 = _sha1(target)
+            source_sha1 = _sha1(source)
+            expected_sha1 = payload.get("source_sha1")
+            if expected_sha1 is not None:
+                if not isinstance(expected_sha1, str) or expected_sha1.lower() != source_sha1.lower():
+                    self._json(
+                        HTTPStatus.CONFLICT,
+                        {
+                            "error": "sidecar source hash does not match the loaded scene; reload the scene and sidecar",
+                            "source_sha1": source_sha1,
+                            "expected_sha1": expected_sha1,
+                        },
+                    )
+                    return
+            if source_sha1 != before_sha1:
+                self._json(
+                    HTTPStatus.CONFLICT,
+                    {
+                        "error": "read source and write target differ; refresh or use the same staged root",
+                        "source_sha1": source_sha1,
+                        "target_sha1": before_sha1,
+                    },
+                )
+                return
             with tempfile.TemporaryDirectory(prefix="soul-re-viewer-") as temp_dir:
                 temp_dir_path = Path(temp_dir)
                 patched_path = temp_dir_path / target.name
@@ -1207,8 +1631,42 @@ class ViewerHandler(BaseHTTPRequestHandler):
                         placements = payload.get("placements")
                         if not isinstance(placements, list):
                             raise ValueError("placements must be an array")
-                        added = _append_scene_placements(source, placements, patched_path)
-                        changed = len(added)
+                        remove_runtime_ids = payload.get("remove_runtime_ids", [])
+                        if not isinstance(remove_runtime_ids, list):
+                            raise ValueError("remove_runtime_ids must be an array")
+                        object_indices = [index for index, item in enumerate(placements) if isinstance(item, dict) and item.get("kind", "object") == "object"]
+                        object_placements = [placements[index] for index in object_indices]
+                        light_placements = [item for item in placements if isinstance(item, dict) and item.get("kind") == "light"]
+                        unsupported = [item.get("kind") for item in placements if isinstance(item, dict) and item.get("kind", "object") not in {"object", "light"}]
+                        if unsupported:
+                            raise ValueError("spawn/trigger placement writing is not implemented yet; use object or light")
+                        changed = 0
+                        added = []
+                        current_source = source
+                        if object_placements or remove_runtime_ids:
+                            placement_result = _apply_managed_scene_placements(
+                                current_source,
+                                object_placements,
+                                remove_runtime_ids,
+                                patched_path,
+                                reserved_ids=_collect_scene_identifiers(self.root),
+                            )
+                            changed += int(placement_result["changed"])
+                            added = placement_result["assigned"]
+                            for item in added:
+                                if isinstance(item, dict) and isinstance(item.get("index"), int) and item["index"] < len(object_indices):
+                                    item["index"] = object_indices[item["index"]]
+                            object_names = [str(item["name"]) for item in added if isinstance(item, dict)]
+                            if object_names:
+                                named_path = temp_dir_path / f"{target.stem}.objects{target.suffix}"
+                                added_names = _append_object_names(patched_path, object_names, named_path)
+                                changed += len(added_names)
+                                patched_path = named_path
+                            current_source = patched_path
+                        if light_placements:
+                            light_path = temp_dir_path / f"{target.stem}.lights{target.suffix}"
+                            changed += _apply_scene_lights(current_source, light_placements, light_path)
+                            patched_path = light_path
                 after_sha1 = _sha1(patched_path)
                 if before_sha1 == after_sha1:
                     self._json(HTTPStatus.OK, {"path": requested, "changed": 0, "added": added, "written": False, "sha1": before_sha1})
@@ -1219,27 +1677,35 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 while backup.exists():
                     backup = target.with_name(f"{target.name}.bak-{timestamp}-{suffix}")
                     suffix += 1
-                shutil.copy2(target, backup)
-                # The build temp directory may be on C: while the writable
-                # AREA is commonly on another drive.  Stage the final copy
-                # beside the target so os.replace remains same-volume and
-                # atomic on Windows.
-                staged_path: Path | None = None
-                try:
-                    descriptor, staged_name = tempfile.mkstemp(
-                        prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
-                    )
-                    os.close(descriptor)
-                    staged_path = Path(staged_name)
-                    shutil.copyfile(patched_path, staged_path)
-                    os.replace(staged_path, target)
-                    staged_path = None
-                finally:
-                    if staged_path is not None:
-                        try:
-                            staged_path.unlink()
-                        except FileNotFoundError:
-                            pass
+                with self.write_lock:
+                    current_sha1 = _sha1(target)
+                    if current_sha1 != before_sha1:
+                        self._json(
+                            HTTPStatus.CONFLICT,
+                            {"error": "target changed while the edit was being prepared; reload and retry"},
+                        )
+                        return
+                    shutil.copy2(target, backup)
+                    # The build temp directory may be on C: while the writable
+                    # AREA is commonly on another drive. Stage the final copy
+                    # beside the target so os.replace remains same-volume and
+                    # atomic on Windows.
+                    staged_path: Path | None = None
+                    try:
+                        descriptor, staged_name = tempfile.mkstemp(
+                            prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
+                        )
+                        os.close(descriptor)
+                        staged_path = Path(staged_name)
+                        shutil.copyfile(patched_path, staged_path)
+                        os.replace(staged_path, target)
+                        staged_path = None
+                    finally:
+                        if staged_path is not None:
+                            try:
+                                staged_path.unlink()
+                            except FileNotFoundError:
+                                pass
             self._json(
                 HTTPStatus.OK,
                 {
@@ -1253,6 +1719,8 @@ class ViewerHandler(BaseHTTPRequestHandler):
                     "after_sha1": after_sha1,
                 },
             )
+        except PermissionError as exc:
+            self._json(HTTPStatus.FORBIDDEN, {"error": str(exc)})
         except FileNotFoundError as exc:
             self._json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
         except (ValueError, json.JSONDecodeError, struct.error) as exc:
@@ -1315,11 +1783,15 @@ def main(argv: list[str] | None = None) -> int:
 
     html_path = Path(__file__).with_name("level_viewer.html")
     html = html_path.read_bytes()
+    write_token = secrets.token_urlsafe(32)
+    token_meta = f'<meta name="soul-re-write-token" content="{write_token}">\n'.encode("ascii")
+    html = html.replace(b"</head>", token_meta + b"</head>", 1)
     handler = type("ConfiguredViewerHandler", (ViewerHandler,), {})
     handler.root = root
     handler.object_root = object_root
     handler.texture_root = texture_root
     handler.write_root = write_root
+    handler.write_token = write_token
     handler.default_asset = initial.relative_to(root).as_posix() if initial else ""
     handler.html = html
     server = ThreadingHTTPServer((args.host, args.port), handler)

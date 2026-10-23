@@ -26,7 +26,9 @@ def module_offset(data: bytes) -> tuple[int, int]:
     if len(data) < 4:
         raise ValueError("scene is too small")
     reloc_count = struct.unpack_from("<I", data, 0)[0]
-    table_end = 4 + (reloc_count + 1) * 4
+    # The count word is not itself a relocation entry. The first module is
+    # aligned after exactly ``reloc_count`` entries.
+    table_end = 4 + reloc_count * 4
     module = (table_end + 0x7FF) & ~0x7FF
     if module >= len(data):
         raise ValueError("relocation table points beyond scene")
@@ -130,6 +132,97 @@ def remap_face_material_offsets(
             struct.pack_into("<H", result, offset + 0x0A, replacement)
             changed += 1
     return bytes(result), changed
+
+
+def map_native_face_materials(
+    early_face_blob: bytes,
+    early_vertices: bytes,
+    native_face_blob: bytes,
+    native_vertices: bytes,
+) -> tuple[bytes, dict[str, int]]:
+    """Copy PC material assignments onto prototype faces by world position.
+
+    Prototype and PC City 9 use different texture-page tables, so a prototype
+    ``TFace.textoff`` cannot be interpreted against the PC texture list.  The
+    terrain itself is nevertheless largely the same: most prototype triangle
+    centroids have an exact or very close PC counterpart.  Match triangles by
+    centroid and copy only the PC material fields (flags and ``textoff``),
+    leaving the prototype vertex and normal indices intact.
+    """
+    if len(early_face_blob) % 0x0C or len(native_face_blob) % 0x0C:
+        raise ValueError("face blobs are not aligned to TFace records")
+    if len(early_vertices) % 0x0C or len(native_vertices) % 0x0C:
+        raise ValueError("vertex blobs are not aligned to TVertex records")
+
+    def positions(blob: bytes) -> list[tuple[int, int, int]]:
+        return [struct.unpack_from("<hhh", blob, offset) for offset in range(0, len(blob), 0x0C)]
+
+    def centroids(face_blob: bytes, vertex_list: list[tuple[int, int, int]]) -> list[tuple[int, int, int]]:
+        result: list[tuple[int, int, int]] = []
+        for offset in range(0, len(face_blob), 0x0C):
+            v0, v1, v2 = struct.unpack_from("<HHH", face_blob, offset)
+            if v0 >= len(vertex_list) or v1 >= len(vertex_list) or v2 >= len(vertex_list):
+                raise ValueError("face references a vertex outside its vertex array")
+            result.append(
+                tuple((vertex_list[v0][axis] + vertex_list[v1][axis] + vertex_list[v2][axis]) // 3 for axis in range(3))
+            )
+        return result
+
+    early_points = centroids(early_face_blob, positions(early_vertices))
+    native_points = centroids(native_face_blob, positions(native_vertices))
+    if not native_points:
+        raise ValueError("native scene has no faces")
+
+    bucket_size = 256
+    buckets: dict[tuple[int, int, int], list[int]] = {}
+    for index, point in enumerate(native_points):
+        key = tuple(math.floor(value / bucket_size) for value in point)
+        buckets.setdefault(key, []).append(index)
+
+    result = bytearray(early_face_blob)
+    exact = 0
+    close = 0
+    max_distance = 0
+    for face_index, point in enumerate(early_points):
+        center = tuple(math.floor(value / bucket_size) for value in point)
+        best_index: int | None = None
+        best_distance: int | None = None
+        for radius in range(0, 16):
+            candidates: list[int] = []
+            for bx in range(center[0] - radius, center[0] + radius + 1):
+                for by in range(center[1] - radius, center[1] + radius + 1):
+                    for bz in range(center[2] - radius, center[2] + radius + 1):
+                        candidates.extend(buckets.get((bx, by, bz), ()))
+            for candidate in candidates:
+                native_point = native_points[candidate]
+                distance = sum((point[axis] - native_point[axis]) ** 2 for axis in range(3))
+                if best_distance is None or distance < best_distance:
+                    best_distance = distance
+                    best_index = candidate
+            if best_index is not None:
+                break
+        if best_index is None:
+            best_index = min(
+                range(len(native_points)),
+                key=lambda candidate: sum((point[axis] - native_points[candidate][axis]) ** 2 for axis in range(3)),
+            )
+            best_distance = sum((point[axis] - native_points[best_index][axis]) ** 2 for axis in range(3))
+        distance = math.isqrt(best_distance or 0)
+        max_distance = max(max_distance, distance)
+        if distance == 0:
+            exact += 1
+        if distance <= 64:
+            close += 1
+        source = best_index * 0x0C
+        target = face_index * 0x0C
+        result[target + 6 : target + 8] = native_face_blob[source + 6 : source + 8]
+        result[target + 10 : target + 12] = native_face_blob[source + 10 : source + 12]
+
+    return bytes(result), {
+        "exact_centroid_matches": exact,
+        "close_centroid_matches": close,
+        "max_centroid_distance": max_distance,
+    }
 
 
 def build_morph_normal_indices(face_blob: bytes) -> bytes:
@@ -347,7 +440,13 @@ def copy_early_bsp(
                 extra_relocs.append(new_rel + (leaf_rel - old_start) + 0x08)
             leaf_rel += 0x30
 
-    return new_rel, count, patched_faces, extra_relocs
+    # ``new_rel`` is the beginning of the copied graph (usually the first
+    # BSP node), while Terrain.BSPTreeArray must point at the tree-record
+    # array inside that graph.  The old return value pointed Terrain at the
+    # graph start, so the runtime interpreted a BSP node as a BSPTree and
+    # read bogus roots/global offsets.  Return the translated tree-array
+    # location instead.
+    return tree_copy_base, count, patched_faces, extra_relocs
 
 
 def rebuild_relocation_table(data: bytearray, module_offset: int, extra: list[int]) -> bytearray:
@@ -432,9 +531,12 @@ def convert(
     copy_early_bsp_graph: bool = False,
     rebalance_bsp: bool = False,
     sanitize_materials: bool = False,
+    map_native_materials: bool = False,
     match_native_vertices: bool = False,
     copy_stream_portals: bool = False,
 ) -> dict[str, object]:
+    if early_path.resolve(strict=False) == output_path.resolve(strict=False) or template_path.resolve(strict=False) == output_path.resolve(strict=False):
+        raise ValueError("output must be a separate staged file from both input scenes")
     early = early_path.read_bytes()
     template = bytearray(template_path.read_bytes())
     early_module, early_relocs = module_offset(early)
@@ -481,6 +583,21 @@ def convert(
         "normals": checked_span(early, early_module + early_ptrs["normals"], early_counts["normals"], 0x08, "early normal"),
     }
     remapped_materials = 0
+    mapped_native_materials: dict[str, int] | None = None
+    if map_native_materials:
+        native_vertex_rel = u32(template, template_terrain + 0x1C)
+        native_face_rel = u32(template, template_terrain + 0x20)
+        native_vertex_count = i32(template, template_terrain + 0x10)
+        native_face_count = i32(template, template_terrain + 0x14)
+        native_vertices = checked_span(
+            template, template_module + native_vertex_rel, native_vertex_count, 0x0C, "template vertex"
+        )
+        native_faces = checked_span(
+            template, template_module + native_face_rel, native_face_count, 0x0C, "template face"
+        )
+        arrays["faces"], mapped_native_materials = map_native_face_materials(
+            arrays["faces"], arrays["vertices"], native_faces, native_vertices
+        )
     if sanitize_materials:
         native_texture_start = u32(template, template_terrain + 0x34)
         native_texture_end = u32(template, template_terrain + 0x38)
@@ -702,6 +819,7 @@ def convert(
         "world_name": world_name,
         "stream_unit_id": stream_unit_id,
         "remapped_material_offsets": remapped_materials,
+        "mapped_native_materials": mapped_native_materials,
         "resized_morph_data": resized_morph_data,
         "matched_native_vertices": match_native_vertices,
         "copied_stream_portals": copied_stream_portals,
@@ -746,6 +864,11 @@ def main() -> int:
         help="remap prototype TFace texture offsets into the wrapper texture table",
     )
     parser.add_argument(
+        "--map-native-materials",
+        action="store_true",
+        help="copy native PC face materials by matching prototype/native face centroids",
+    )
+    parser.add_argument(
         "--match-native-vertices",
         action="store_true",
         help="map each native vertex position to its nearest prototype position",
@@ -771,6 +894,7 @@ def main() -> int:
         copy_early_bsp_graph=args.copy_early_bsp,
         rebalance_bsp=args.rebalance_native_bsp,
         sanitize_materials=args.sanitize_materials,
+        map_native_materials=args.map_native_materials,
         match_native_vertices=args.match_native_vertices,
         copy_stream_portals=args.copy_stream_portals,
     )

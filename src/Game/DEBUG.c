@@ -341,6 +341,8 @@ DebugMenuLine CityMenu[] = {
     {DEBUG_LINE_TYPE_MENU, 0, 0, "AREA MENU...", (long *)levelSelectMenu, 0},
     {DEBUG_LINE_TYPE_ACTION, 2, 0, "CITY 2", (long *)DEBUG_LevelSelectNew, 0},
     {DEBUG_LINE_TYPE_ACTION, 9, 0, "CITY 9", (long *)DEBUG_LevelSelectNew, 0},
+    {DEBUG_LINE_TYPE_ACTION, 10, 0, "CITY 10", (long *)DEBUG_LevelSelectNew, 0},
+    {DEBUG_LINE_TYPE_ACTION, 11, 0, "CITY 11", (long *)DEBUG_LevelSelectNew, 0},
     {DEBUG_LINE_TYPE_ACTION, 0xE, 0, "CITY 14", (long *)DEBUG_LevelSelectNew, 0},
     {DEBUG_LINE_TYPE_ENDLIST, 0, 0, "", &gameTrackerX.debugFlags, 0},
 };

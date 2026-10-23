@@ -65,6 +65,15 @@ material with its `<name>_D.DDS` diffuse texture from `1/TEX`, and render the
 material groups in WebGL. The viewer converts DDS to browser-compatible PNG on
 demand; `--texture-root` can override the automatic sibling `TEX` directory.
 
+Terrain scenes now read the native `TFace`/`TextureFT3` records as well. Their
+per-face UVs are expanded when necessary (shared terrain vertices can have
+different UVs), and remaster texture pages are resolved through
+`AREA/TEX_HD.MAP` to the numeric DDS tiles in `1/TEX` (for example
+`1002_10.DDS`). The viewport toolbar also provides **Inside view**, which culls
+front-facing terrain polygons, and **X-ray**, which renders terrain
+translucently so room interiors and objects can be inspected without editing
+the source asset.
+
 The viewer can therefore inspect remaster levels directly:
 
 ```powershell

@@ -1,149 +1,277 @@
-<!doctype html>
+<!DOCTYPE html>
+
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Soul Reaver 3D Level Viewer</title>
-  <style>
-    :root { color-scheme: dark; --panel: #111827; --panel2: #182235; --line: #2e3c55; --text: #e7edf7; --muted: #9aa8bd; --accent: #7dd3fc; }
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>Soul Reaver Level Editor</title>
+<style>
+    :root { color-scheme: dark; --panel: #131b27; --panel2: #1c2838; --line: #34445b; --text: #e8eef6; --muted: #a6b5c9; --accent: #86d5ed; --warning: #f2c178; --danger: #ffabb0; }
     * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #080d16; color: var(--text); font: 14px "Segoe UI", system-ui, sans-serif; }
-    #app { display: grid; grid-template-columns: 320px 1fr; height: 100%; }
-    aside { padding: 18px; background: var(--panel); border-right: 1px solid var(--line); overflow: auto; }
-    h1 { margin: 0 0 4px; font-size: 20px; font-weight: 650; }
-    h2 { margin: 20px 0 8px; font-size: 13px; color: var(--accent); text-transform: uppercase; letter-spacing: .08em; }
-    p { color: var(--muted); line-height: 1.45; }
-    label { display: block; margin: 10px 0 5px; color: var(--muted); }
-    select, input, button { width: 100%; border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; color: var(--text); background: var(--panel2); font: inherit; }
-    button { cursor: pointer; }
-    button:hover { border-color: var(--accent); }
+    [hidden] { display: none !important; }
+    html, body { margin: 0; height: 100%; background: #0b111b; color: var(--text); font: 13px/1.45 "Segoe UI", system-ui, sans-serif; }
+    #app { height: 100dvh; display: grid; grid-template: auto auto minmax(0,1fr) / 360px minmax(280px,1fr) 290px; }
+    .app-header { grid-column: 1/-1; display: flex; align-items: center; gap: 24px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: #172231; }
+    .brand { min-width: 170px; }
+    h1 { font-size: 18px; line-height: 1.2; margin: 0; font-weight: 650; letter-spacing: .01em; }
+    .eyebrow { font-size: 10px; text-transform: uppercase; letter-spacing: .15em; color: var(--accent); }
+    .scene-picker { flex: 1; max-width: 680px; display: flex; align-items: center; gap: 10px; }
+    .scene-picker label { white-space: nowrap; margin: 0; }
+    .scene-picker select { min-width: 0; }
+    .app-header button { width: auto; white-space: nowrap; }
+    .safety-bar { grid-column: 1/-1; background: #101923; border-bottom: 1px solid var(--line); padding: 9px 18px; display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 4px 24px; font-size: 11px; }
+    .safety-bar p { margin: 0; overflow-wrap: anywhere; }
+    .safety-bar strong { color: var(--muted); font-weight: 500; margin-right: 8px; }
+    .safety-bar code { font-family: Consolas, monospace; color: var(--text); }
+    #writeMode { color: var(--accent); font-weight: 600; }
+    #writeMode[data-enabled="true"] { color: var(--warning); }
+    #sceneWarning { grid-column: 1/-1; }
+    aside { min-height: 0; min-width: 0; overflow: auto; background: var(--panel); scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+    #inspector { border-right: 1px solid var(--line); }
+    #scenePanels { border-left: 1px solid var(--line); }
+    .section { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    h2 { margin: 0 0 10px; font-size: 12px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+    h3 { margin: 0 0 10px; font-size: 13px; }
+    p { color: var(--muted); margin: 8px 0; }
+    label { display: block; margin: 10px 0 5px; color: var(--muted); font-size: 12px; }
+    input, select, button { min-width: 0; width: 100%; border: 1px solid var(--line); border-radius: 5px; padding: 8px 9px; color: var(--text); background: var(--panel2); font: inherit; }
+    button { cursor: pointer; font-weight: 550; transition: background .12s, border-color .12s; }
+    button:hover:not(:disabled) { background: #293d52; border-color: var(--accent); }
+    button:disabled, input:disabled, select:disabled { opacity: .45; cursor: not-allowed; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    button.primary { background: #28546b; border-color: #54869b; }
+    button.danger { color: var(--danger); border-color: #75444c; }
+    button.apply { color: #ffe0ad; border-color: #8c6941; background: #3c3024; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .stat { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid rgba(255,255,255,.06); padding: 5px 0; }
-    .stat span:first-child { color: var(--muted); }
-    .stat span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
-    #markers { max-height: 270px; overflow: auto; border: 1px solid var(--line); border-radius: 5px; }
-    #placements { max-height: 190px; overflow: auto; border: 1px solid var(--line); border-radius: 5px; }
-    .marker { padding: 5px 7px; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 12px; }
-    .marker:last-child { border-bottom: 0; }
-    .marker[data-index] { cursor: pointer; }
-    .marker.selected { background: #21405b; }
-    .marker-kind { display: inline-block; width: 45px; color: var(--accent); text-transform: uppercase; font-size: 10px; }
-    .marker-pos { color: var(--muted); margin-left: 45px; }
-    .placement { padding: 6px 7px; border-bottom: 1px solid rgba(255,255,255,.06); cursor: pointer; font-size: 12px; }
+    .help { font-size: 11px; color: var(--muted); line-height: 1.5; }
+    .notice { padding: 8px 10px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 4px; background: #162735; overflow-wrap: anywhere; }
+    .notice:empty { display: none; }
+    .notice[data-tone="warning"], .notice.warning { border-color: #84633b; border-left-color: var(--warning); color: #ffdda9; background: #30271d; }
+    .notice[data-tone="error"] { border-color: #94535c; border-left-color: var(--danger); color: #ffbdc2; background: #352027; }
+    .notice[data-tone="success"] { border-color: #3f756a; border-left-color: #82dbb4; color: #a0e4c8; background: #152d29; }
+    #objectSearch { margin-bottom: 8px; }
+    .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .badge { font-size: 10px; letter-spacing: .04em; padding: 2px 5px; border-radius: 3px; color: #b9d7ff; border: 1px solid #456186; background: #20334d; white-space: nowrap; }
+    .badge.custom { color: #9de7c8; border-color: #3c7562; background: #193c31; }
+    #placements { max-height: 170px; overflow: auto; border: 1px solid var(--line); border-radius: 5px; }
+    .placement { display: block; width: 100%; text-align: left; padding: 9px 10px; border: 0; border-bottom: 1px solid #29384a; border-radius: 0; background: transparent; font-weight: 400; }
     .placement:last-child { border-bottom: 0; }
-    .placement.selected { background: #21405b; }
-    .placement-pos { color: var(--muted); margin-top: 2px; }
-    .coord-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .placement.selected { background: #203e53; box-shadow: inset 3px 0 var(--accent); }
+    .placement-heading { display: flex; gap: 6px; align-items: center; }
+    .placement-heading b { flex: 1; overflow-wrap: anywhere; }
+    .placement-pos { color: var(--muted); font-size: 11px; margin-top: 4px; overflow-wrap: anywhere; }
+    #selectionName { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+    #selectionMeta { margin-top: 4px; }
+    .coord-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; }
     .coord-grid label { margin: 0; font-size: 11px; }
-    #viewport { position: relative; min-width: 0; }
-    canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+    .coord-grid input { margin-top: 4px; font-variant-numeric: tabular-nums; }
+    .transform-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 5px; }
+    .transform-grid button { padding: 6px; }
+    details { border-bottom: 1px solid var(--line); }
+    summary { padding: 12px 16px; cursor: pointer; font-weight: 600; }
+    summary:hover { background: #1a293a; }
+    details[open] > summary { color: var(--accent); }
+    .panel-content { padding: 0 16px 16px; }
+    .panel-content > label:first-child { margin-top: 0; }
+    #viewport { position: relative; min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr) auto; background: #080d16; }
+    .viewport-toolbar { display: flex; align-items: center; gap: 14px; padding: 9px 14px; background: #111b29; border-bottom: 1px solid var(--line); }
+    .viewport-toolbar button { width: auto; margin-left: auto; }
+    .check { display: flex; align-items: center; gap: 7px; margin: 0; }
+    input[type=checkbox] { width: 14px; height: 14px; padding: 0; accent-color: var(--accent); }
+    .canvas-wrap { position: relative; min-height: 0; overflow: hidden; }
+    canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
     canvas.dragging { cursor: grabbing; }
-    #hud { position: absolute; left: 16px; right: 16px; top: 14px; display: flex; justify-content: space-between; pointer-events: none; color: var(--muted); text-shadow: 0 1px 2px #000; }
+    #hud { position: absolute; top: 14px; left: 16px; right: 16px; pointer-events: none; display: flex; gap: 12px; justify-content: space-between; color: var(--muted); font-size: 11px; text-shadow: 0 1px 2px #000; }
+    #title { overflow-wrap: anywhere; }
+    .viewport-footer { padding: 9px 14px; border-top: 1px solid var(--line); background: #111b29; color: var(--muted); font-size: 11px; }
+    kbd { color: var(--text); font: inherit; background: #263446; padding: 1px 4px; border-radius: 3px; }
     #status { color: var(--accent); }
-    .help { font-size: 12px; }
-    .event-box { border: 1px solid var(--line); border-radius: 5px; padding: 8px; background: rgba(24,34,53,.55); }
-    .event-box label { margin-top: 7px; }
-    .event-token { display: grid; grid-template-columns: 42px 1fr 74px; gap: 5px; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 11px; }
-    .event-token:last-child { border-bottom: 0; }
+    #markers, #portals, #bspRoots { max-height: 250px; overflow: auto; border: 1px solid var(--line); border-radius: 5px; margin-top: 10px; }
+    .marker { padding: 7px; border-bottom: 1px solid #29384a; font-size: 11px; overflow-wrap: anywhere; }
+    .marker[data-index] { cursor: pointer; }
+    .marker[data-index]:hover, .marker.selected { background: #21405b; }
+    .marker-kind { color: var(--accent); text-transform: uppercase; font-size: 10px; margin-right: 7px; }
+    .marker-pos { color: var(--muted); margin-top: 3px; }
+    .stat { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid #29384a; padding: 6px 0; font-size: 11px; }
+    .stat span:first-child { color: var(--muted); }
+    .stat span:last-child { text-align: right; overflow-wrap: anywhere; min-width: 0; }
+    .event-token { display: grid; grid-template-columns: 36px minmax(0,1fr) 65px; gap: 5px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 11px; }
     .event-token small { color: var(--muted); }
-    #eventTokens { max-height: 210px; overflow: auto; margin-top: 6px; }
-    input[type=checkbox] { accent-color: #38bdf8; }
-    .check { display: flex; align-items: center; gap: 7px; margin: 11px 0; color: var(--muted); }
-    #texturePreview { display: block; width: 100%; max-height: 180px; object-fit: contain; image-rendering: auto; background: #080d16; border: 1px solid var(--line); border-radius: 5px; }
-  </style>
+    #eventTokens { max-height: 240px; overflow: auto; margin-top: 8px; }
+    #texturePreview { display: block; width: 100%; max-height: 180px; object-fit: contain; background: #080d16; border: 1px solid var(--line); border-radius: 5px; }
+    #app.panels-hidden { grid-template-columns: 360px minmax(280px,1fr); }
+    @media (max-width: 1200px) {
+      #app, #app.panels-hidden { grid-template-columns: 330px minmax(280px,1fr); }
+      #scenePanels { position: fixed; right: 0; top: 170px; bottom: 0; width: 290px; z-index: 5; box-shadow: -12px 0 32px #0008; }
+      .viewport-toolbar { flex-wrap: wrap; gap: 8px 14px; }
+    }
+    @media (max-width: 700px) {
+      #app, #app.panels-hidden { height: auto; min-height: 100dvh; display: flex; flex-direction: column; }
+      .app-header { flex-wrap: wrap; gap: 10px; padding: 12px; }
+      .brand { flex: 1; }
+      .scene-picker { order: 3; flex-basis: 100%; }
+      .safety-bar { grid-template-columns: minmax(0,1fr); padding: 10px 12px; }
+      #viewport { order: 1; height: 52dvh; min-height: 320px; }
+      #inspector { order: 2; border-right: 0; }
+      #scenePanels { order: 3; position: static; width: auto; box-shadow: none; border-left: 0; }
+      aside { overflow: visible; }
+      .viewport-toolbar { padding: 8px 12px; }
+      #placements { max-height: 240px; }
+    }
+
+    #inspector { display: flex; flex-direction: column; overflow: hidden; }
+    .inspector-scroll { min-height: 0; overflow: auto; scrollbar-width: thin; }
+    .apply-dock { flex-shrink: 0; padding: 10px 16px 14px; background: #182230; border-top: 1px solid var(--line); }
+    .apply-dock p { margin: 0 0 8px; }
+    #hud > span:first-child { min-width: 0; }
+    #hud > span:last-child { flex-shrink: 0; }
+    .stat span:first-child { flex-shrink: 0; }
+    @media (max-width: 700px) { #inspector, .inspector-scroll { overflow: visible; } }
+</style>
 </head>
 <body>
 <div id="app">
-  <aside>
-    <h1>Soul Reaver 3D Viewer</h1>
-    <p>Inspect extracted DRM terrain and PCM/SRM object models. Placements can be exported as JSON or appended to a staged AREA scene with a backup.</p>
-    <h2>Asset</h2>
-    <label for="asset">DRM / PCM asset</label>
-    <select id="asset"></select>
-    <div class="row" style="margin-top:8px">
-      <button id="reset">Reset view</button>
-      <button id="reload">Reload asset</button>
-    </div>
-    <h2>Display</h2>
-    <label class="check"><input id="wire" type="checkbox"> wireframe overlay</label>
-    <label class="check"><input id="markersToggle" type="checkbox" checked> scene markers</label>
-    <h2>Events</h2>
-    <div class="event-box">
-      <button id="loadEvents">Load events</button>
-      <label for="eventSelect">event</label>
-      <select id="eventSelect" disabled><option value="">Load events first</option></select>
-      <div id="eventEditor" hidden>
-        <label for="eventNumber">event number</label>
-        <input id="eventNumber" type="number" step="1">
-        <label>event variables</label>
-        <div class="coord-grid"><input id="eventVar0" type="number" step="1"><input id="eventVar1" type="number" step="1"><input id="eventVar2" type="number" step="1"><input id="eventVar3" type="number" step="1"><input id="eventVar4" type="number" step="1"></div>
-        <label for="eventAction">action line</label>
-        <select id="eventAction"></select>
-        <div id="eventMeaning" class="help" style="margin-top:7px"></div>
-        <div id="eventTokens"></div>
-        <button id="applyEvents" style="margin-top:8px" disabled>Apply event edits</button>
-      </div>
-      <div id="eventStatus" class="help" style="margin-top:7px">Events are loaded from the selected area PCM/DRM.</div>
-    </div>
-    <h2>Placements</h2>
-    <label for="objectType">object type</label>
-    <select id="objectType"><option value="object">object</option><option value="spawn">spawn point</option><option value="trigger">trigger</option><option value="light">light</option></select>
-    <label for="objectAsset">object PCM / SRM</label>
-    <select id="objectAsset"><option value="">placement marker only</option></select>
-    <label for="animationAsset">animation SRL</label>
-    <select id="animationAsset"><option value="">no animation</option></select>
-    <label class="check"><input id="animationPlaying" type="checkbox" checked> play animation</label>
-    <button id="animationToggle" style="margin-top:4px">Pause SRL playback</button>
-    <label for="animationSpeed">animation speed <span id="animationSpeedValue">1.0×</span></label>
-    <input id="animationSpeed" type="range" min="0.1" max="2" step="0.1" value="1">
-    <p class="help">SRL files contain skeletal matrix frames. Select an SRM and an SRL to preview weighted playback; PCM meshes remain static.</p>
-    <label for="sraAsset">object animation archive (SRA)</label>
-    <select id="sraAsset"><option value="">choose an SRA archive</option></select>
-    <label for="sraClip">SRA clip</label>
-    <select id="sraClip" disabled><option value="">select an archive first</option></select>
-    <button id="sraPlay" style="margin-top:8px" disabled title="Choose an SRA clip first">Play SRA clip</button>
-    <div id="sraInfo" class="help">Choose an SRA clip to decode its compressed G2 channels and preview playback.</div>
-    <label>diffuse texture preview</label>
-    <img id="texturePreview" alt="No diffuse texture loaded" hidden>
-    <label for="objectName">name</label>
-    <input id="objectName" value="custom_object" maxlength="48">
-    <div class="coord-grid" style="margin-top:8px">
-      <label>X<input id="objectX" type="number" step="1"></label>
-      <label>Y<input id="objectY" type="number" step="1"></label>
-      <label>Z<input id="objectZ" type="number" step="1"></label>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <button id="placeCenter">Place at center</button>
-      <button id="placeMode">Click to place</button>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <button id="exportPlacements">Export JSON</button>
-      <button id="importPlacements">Import JSON</button>
-    </div>
-    <button id="applyPlacements" style="margin-top:8px" disabled>Apply objects to AREA</button>
-    <input id="placementFile" type="file" accept="application/json" hidden>
-    <button id="deletePlacement" style="margin-top:8px">Delete selected</button>
-    <div id="placements" style="margin-top:8px"><div class="placement">No custom placements.</div></div>
-    <h2>Geometry</h2>
-    <div id="stats"><div class="stat"><span>Status</span><span id="status">Loading…</span></div></div>
-    <h2>Markers</h2>
-    <div class="coord-grid" style="margin-top:8px">
-      <label>X<input id="markerX" type="number" step="1"></label>
-      <label>Y<input id="markerY" type="number" step="1"></label>
-      <label>Z<input id="markerZ" type="number" step="1"></label>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <button id="exportScene">Export scene</button>
-      <button id="applyMarkers" disabled>Apply to AREA</button>
-    </div>
-    <div id="writeStatus" class="help">Direct writes disabled.</div>
-    <div id="markers"><div class="marker">No markers loaded.</div></div>
-    <p class="help">Drag to orbit. Shift-drag to pan. Mouse wheel zooms. Click-to-place raycasts the terrain. X/Y are the level plane; Z is height.</p>
-  </aside>
-  <main id="viewport">
-    <canvas id="canvas"></canvas>
-    <div id="hud"><span id="title">No asset selected</span><span>WebGL</span></div>
-  </main>
+<header class="app-header">
+<div class="brand"><div class="eyebrow">Scene workspace</div><h1>Soul Reaver <span style="color:var(--muted);font-weight:400">/ Editor</span></h1></div>
+<div class="scene-picker"><label for="asset">Scene</label><select id="asset" title="Load a DRM scene or PCM asset"></select><button id="reload" title="Reload geometry from disk; retains object edits for the same scene">Reload</button></div>
+<button aria-controls="scenePanels" aria-expanded="true" id="togglePanels">Scene panels</button>
+</header>
+<section aria-label="Scene and write safety" class="safety-bar">
+<p><strong>Loaded scene</strong><code id="scenePath">No scene loaded</code></p>
+<p><strong>Write mode</strong><span id="writeMode">Checking…</span></p>
+<p><strong>SHA-1</strong><code id="sceneHash">—</code></p>
+<p><strong>Write target</strong><code id="stagedTarget">Not configured</code></p>
+<div class="notice warning" hidden="" id="sceneWarning" role="alert"></div>
+</section>
+<aside aria-label="Objects and properties" id="inspector"><div class="inspector-scroll">
+<section class="section">
+<div class="section-heading"><h2>Scene objects</h2><span class="help" id="objectCount">0 objects</span></div>
+<label class="help" for="objectSearch">Find by name, asset, runtime ID, or origin</label>
+<input autocomplete="off" id="objectSearch" placeholder="Search native and custom objects…" type="search"/>
+<div aria-label="Scene objects" id="placements"><div class="placement">No scene objects.</div></div>
+</section>
+<section aria-label="Selection" class="section">
+<div class="eyebrow">Object inspector</div><div id="selectionName">No object selected</div>
+<div class="help" id="selectionMeta">Choose an object above or create one below.</div>
+<div class="row" style="margin-top:8px">
+<button id="duplicatePlacement" title="Duplicate selected object (Ctrl+D)">Duplicate selected</button>
+<button class="danger" id="deletePlacement" title="Remove selected object (Delete). Native removal requires confirmation.">Delete selected</button>
+</div></section>
+<section class="section"><h2>Transform</h2> <div class="coord-grid" style="margin-top:8px">
+<label>X<input id="objectX" step="1" type="number"/></label>
+<label>Y<input id="objectY" step="1" type="number"/></label>
+<label>Z<input id="objectZ" step="1" type="number"/></label>
+</div>
+<label for="objectRotation">yaw / rotation Z (degrees)</label>
+<input id="objectRotation" step="1" type="number" value="0"/>
+<div class="coord-grid">
+<label>move step<input id="transformStep" max="10000" min="1" step="1" type="number" value="10"/></label>
+<label>rotate step<input id="rotationStep" max="180" min="1" step="1" type="number" value="5"/></label>
+<span></span>
+</div>
+<div class="transform-grid" style="margin-top:6px">
+<button id="nudgeXMinus" title="Move −X by the move step">−X</button><button id="nudgeXPlus" title="Move +X by the move step">+X</button>
+<button id="nudgeYMinus" title="Move −Y by the move step">−Y</button><button id="nudgeYPlus" title="Move +Y by the move step">+Y</button>
+<button id="nudgeZMinus" title="Move −Z by the move step">−Z</button><button id="nudgeZPlus" title="Move +Z by the move step">+Z</button>
+<button id="rotateMinus" title="Decrease Z yaw by the rotation step">↺ rotate</button><button id="rotatePlus" title="Increase Z yaw by the rotation step">rotate ↻</button>
+</div>
+<p class="help">Buttons move the selected object immediately in the editor. Rotation is yaw around Z.</p><button class="primary" disabled="" id="applyPlacementEdit" style="margin-top:8px" title="Update the selected object in the editor; does not write to disk">Update selected</button></section>
+<details open=""><summary>Identity &amp; runtime name</summary><div class="panel-content"> <label for="objectType">object type</label>
+<select id="objectType"><option value="object">object</option><option value="spawn">spawn point</option><option value="trigger">trigger</option><option value="light">light</option></select>
+<label for="objectName">name</label>
+<input id="objectName" maxlength="48" value="custom_object"/>
+<label for="objectRuntimeName">runtime object name <span class="help">(optional, max 15 ASCII bytes)</span></label>
+<input id="objectRuntimeName" maxlength="15" placeholder="derived from asset/name" spellcheck="false" value=""/>
+</div></details>
+<details open=""><summary>Object asset</summary><div class="panel-content"> <label for="objectAsset">object PCM / SRM</label>
+<select id="objectAsset"><option value="">placement marker only</option></select>
+<div id="assetPreviewStatus" class="help notice" role="status" hidden></div>
+<label>diffuse texture preview</label>
+<img alt="No diffuse texture loaded" hidden="" id="texturePreview"/>
+</div></details>
+<details><summary>Animation preview</summary><div class="panel-content"> <label for="animationAsset">animation SRL</label>
+<select id="animationAsset"><option value="">no animation</option></select>
+<label class="check"><input checked="" id="animationPlaying" type="checkbox"/> play animation</label>
+<button id="animationToggle" style="margin-top:4px">Pause SRL playback</button>
+<label for="animationSpeed">animation speed <span id="animationSpeedValue">1.0×</span></label>
+<input id="animationSpeed" max="2" min="0.1" step="0.1" type="range" value="1"/>
+<p class="help">SRL files contain skeletal matrix frames. Select an SRM and an SRL to preview weighted playback; PCM meshes remain static.</p>
+<label for="sraAsset">object animation archive (SRA)</label>
+<select id="sraAsset"><option value="">choose an SRA archive</option></select>
+<label for="sraClip">SRA clip</label>
+<select disabled="" id="sraClip"><option value="">select an archive first</option></select>
+<button disabled="" id="sraPlay" style="margin-top:8px" title="Choose an SRA clip first">Play SRA clip</button>
+<div class="help" id="sraInfo">Choose an SRA clip to decode its compressed G2 channels and preview playback.</div>
+</div></details>
+<section class="section"><h2>Create object</h2>
+
+<p class="help">Fields update the editor as you type. Disk writes require Apply below.</p> <div class="row" style="margin-top:8px">
+<button id="placeCenter">Place at center</button>
+<button id="placeMode">Click to place</button>
+</div>
+<p class="help">Create a custom object using these properties, at the scene center or a terrain point.</p></section>
+<section class="section"><h2>Save &amp; apply</h2> <div class="row" style="margin-top:8px">
+<button id="exportPlacements" title="Download placements as a compatible v2 JSON sidecar">Export JSON</button>
+<button id="importPlacements" title="Load a v1 or v2 placement sidecar">Import JSON</button>
+</div>
+<input accept="application/json" hidden="" id="placementFile" type="file"/>
+<div class="help notice" id="placementStatus" role="status" style="margin-top:10px">Select an object to edit. Export JSON to save a sidecar.</div>
+<div class="help notice warning" hidden="" id="sidecarWarning" role="alert" style="margin-top:8px"></div>
+
+
+<div class="help notice" id="writeStatus" role="status" style="margin-top:8px">Direct writes disabled.</div>
+<p class="help">Check the target above is a staging copy. Apply writes that file after confirmation and creates a backup when it changes.</p>
+</section>
+</div><div class="apply-dock"><p class="help" id="applyHelp">Apply requires an explicit write root.</p><button class="apply" disabled="" id="applyPlacements">Apply scene to AREA…</button></div></aside>
+<main aria-label="3D viewport" id="viewport">
+<div aria-label="View controls" class="viewport-toolbar">
+<label class="check"><input id="wire" type="checkbox"/>Wireframe</label>
+<label class="check"><input checked="" id="markersToggle" type="checkbox"/>Markers</label>
+<label class="check"><input checked="" id="portalsToggle" type="checkbox"/>Portals</label>
+<label class="check" title="Cull front-facing terrain polygons so the room interior is visible"><input id="insideViewToggle" type="checkbox"/>Inside view</label>
+<label class="check" title="Render terrain translucently so hidden rooms remain visible"><input id="transparentToggle" type="checkbox"/>X-ray</label>
+<button id="reset" title="Reset camera orbit, pan, and zoom">Reset view</button>
+</div>
+<div class="canvas-wrap"><canvas aria-label="3D scene. Drag to orbit, Shift-drag to pan, scroll to zoom." id="canvas" tabindex="0"></canvas><div id="hud"><span id="title">No asset selected</span><span>WebGL</span></div></div>
+<div class="viewport-footer"><span id="status" role="status">Loading…</span><br/>Drag to orbit · Shift-drag to pan · Scroll to zoom · <b>Inside view</b> hides front faces · <b>X-ray</b> makes terrain translucent<br/>Object: <kbd>↑ ↓ ← →</kbd> move X/Y · <kbd>PgUp/PgDn</kbd> Z · <kbd>Q/E</kbd> yaw · <kbd>Shift</kbd> larger step</div>
+</main>
+<aside aria-label="Scene inspection panels" id="scenePanels">
+<div class="section"><h2>Scene inspection</h2><p class="help">Expand a panel to inspect or edit scene data.</p></div>
+<details><summary>Markers</summary><div class="panel-content">
+<div class="coord-grid" style="margin-top:8px">
+<label>X<input id="markerX" step="1" type="number"/></label>
+<label>Y<input id="markerY" step="1" type="number"/></label>
+<label>Z<input id="markerZ" step="1" type="number"/></label>
+</div>
+<div class="row" style="margin-top:8px">
+<button id="exportScene">Export scene</button>
+<button class="apply" disabled="" id="applyMarkers">Apply to AREA</button>
+</div>
+<div id="markers"><div class="marker">No markers loaded.</div></div>
+</div></details>
+<details><summary>Stream portals</summary><div class="panel-content"><div id="portals"><div class="marker">No portals loaded.</div></div></div></details>
+<details><summary>BSP roots</summary><div class="panel-content"><div id="bspRoots"><div class="marker">No BSP roots loaded.</div></div></div></details>
+<details><summary>Events</summary><div class="panel-content"> <div class="event-box">
+<button id="loadEvents">Load events</button>
+<label for="eventSelect">event</label>
+<select disabled="" id="eventSelect"><option value="">Load events first</option></select>
+<div hidden="" id="eventEditor">
+<label for="eventNumber">event number</label>
+<input id="eventNumber" step="1" type="number"/>
+<label>event variables</label>
+<div class="coord-grid"><input aria-label="Event variable 0" id="eventVar0" step="1" type="number"/><input aria-label="Event variable 1" id="eventVar1" step="1" type="number"/><input aria-label="Event variable 2" id="eventVar2" step="1" type="number"/><input aria-label="Event variable 3" id="eventVar3" step="1" type="number"/><input aria-label="Event variable 4" id="eventVar4" step="1" type="number"/></div>
+<label for="eventAction">action line</label>
+<select id="eventAction"></select>
+<div class="help" id="eventMeaning" style="margin-top:7px"></div>
+<div id="eventTokens"></div>
+<button class="apply" disabled="" id="applyEvents" style="margin-top:8px">Apply event edits</button>
+</div>
+<div class="help notice" id="eventStatus" role="status" style="margin-top:7px">Events are loaded from the selected area PCM/DRM.</div>
+</div>
+</div></details>
+<details open=""><summary>Diagnostics</summary><div class="panel-content"><div id="stats"></div></div></details>
+<details><summary>Keyboard &amp; help</summary><div class="panel-content"><p class="help">Click an object in the list or viewport to select it. Use the transform buttons or keyboard to edit without dragging.</p><p class="help">Arrow keys: X/Y by 10. PageUp/PageDown: Z by 10. Q/E: yaw by 5°. Shift: 100 units or 15°. Ctrl+D: duplicate. Delete: remove selected.</p><p class="help">Shortcuts are paused while typing in fields. JSON sidecars preserve editor placements; Apply writes the configured AREA target.</p></div></details>
+</aside>
 </div>
 <script>
 "use strict";
@@ -153,8 +281,13 @@ const statusEl = document.getElementById("status");
 const titleEl = document.getElementById("title");
 const assetSelect = document.getElementById("asset");
 const markersEl = document.getElementById("markers");
+const portalsEl = document.getElementById("portals");
+const bspRootsEl = document.getElementById("bspRoots");
 const wireToggle = document.getElementById("wire");
 const markersToggle = document.getElementById("markersToggle");
+const portalsToggle = document.getElementById("portalsToggle");
+const insideViewToggle = document.getElementById("insideViewToggle");
+const transparentToggle = document.getElementById("transparentToggle");
 const placementsEl = document.getElementById("placements");
 const objectTypeEl = document.getElementById("objectType");
 const objectAssetEl = document.getElementById("objectAsset");
@@ -169,9 +302,13 @@ const animationToggleEl = document.getElementById("animationToggle");
 const animationSpeedEl = document.getElementById("animationSpeed");
 const animationSpeedValueEl = document.getElementById("animationSpeedValue");
 const objectNameEl = document.getElementById("objectName");
+const objectRuntimeNameEl = document.getElementById("objectRuntimeName");
 const objectXEl = document.getElementById("objectX");
 const objectYEl = document.getElementById("objectY");
 const objectZEl = document.getElementById("objectZ");
+const objectRotationEl = document.getElementById("objectRotation");
+const transformStepEl = document.getElementById("transformStep");
+const rotationStepEl = document.getElementById("rotationStep");
 const placeModeEl = document.getElementById("placeMode");
 const placementFileEl = document.getElementById("placementFile");
 const markerXEl = document.getElementById("markerX");
@@ -179,6 +316,9 @@ const markerYEl = document.getElementById("markerY");
 const markerZEl = document.getElementById("markerZ");
 const applyMarkersEl = document.getElementById("applyMarkers");
 const applyPlacementsEl = document.getElementById("applyPlacements");
+const applyPlacementEditEl = document.getElementById("applyPlacementEdit");
+const placementStatusEl = document.getElementById("placementStatus");
+const transformButtonEls = ["nudgeXMinus","nudgeXPlus","nudgeYMinus","nudgeYPlus","nudgeZMinus","nudgeZPlus","rotateMinus","rotatePlus"].map(id=>document.getElementById(id));
 const writeStatusEl = document.getElementById("writeStatus");
 const exportSceneEl = document.getElementById("exportScene");
 const loadEventsEl = document.getElementById("loadEvents");
@@ -208,7 +348,8 @@ const fragmentSource = `
   varying vec2 v_uv;
   uniform sampler2D u_texture;
   uniform int u_use_texture;
-  void main() { gl_FragColor = u_use_texture == 1 ? texture2D(u_texture, v_uv) : vec4(v_color, 1.0); }
+  uniform float u_alpha;
+  void main() { vec4 base = u_use_texture == 1 ? texture2D(u_texture, v_uv) : vec4(v_color, 1.0); if (u_use_texture == 1 && base.a < 0.5) discard; gl_FragColor = vec4(base.rgb, u_alpha); }
 `;
 function shader(type, source) { const s = gl.createShader(type); gl.shaderSource(s, source); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
 const program = gl.createProgram();
@@ -223,15 +364,24 @@ const uvLoc = gl.getAttribLocation(program, "a_uv");
 const matrixLoc = gl.getUniformLocation(program, "u_matrix");
 const textureLoc = gl.getUniformLocation(program, "u_texture");
 const useTextureLoc = gl.getUniformLocation(program, "u_use_texture");
+const alphaLoc = gl.getUniformLocation(program, "u_alpha");
 
 let model = null;
 let geometryBuffer = null;
 let colorBuffer = null;
 let uvBuffer = null;
 let indexBuffer = null;
+let untexturedIndexBuffer = null;
+let untexturedIndexCount = 0;
+let terrainIndexType = null;
+const uintIndexExtension = gl.getExtension("OES_element_index_uint");
+function terrainIndexArray(values) { return terrainIndexType === gl.UNSIGNED_INT ? new Uint32Array(values) : new Uint16Array(values); }
 let markerBuffer = null;
 let markerColorBuffer = null;
 let markerCount = 0;
+let portalBuffer = null;
+let portalColorBuffer = null;
+let portalVertexCount = 0;
 let indexCount = 0;
 let objectBuffer = null;
 let objectColorBuffer = null;
@@ -244,6 +394,7 @@ let objectMeshIndexCount = 0;
 let textureGroups = [];
 let loadedTextures = new Map();
 let placements = [];
+let removedRuntimeIds = [];
 let objectAssets = new Map();
 let animationAssets = new Map();
 let sraCatalogs = new Map();
@@ -252,6 +403,72 @@ let selectedPlacement = -1;
 let placementMode = false;
 let selectedMarker = -1;
 let directWritesEnabled = false;
+let writeRoot = "";
+let loadedSceneAsset = "";
+let sceneLoading = false;
+let sceneLoadVersion = 0;
+let importedSidecar = null;
+const objectSearchEl = document.getElementById("objectSearch");
+
+// Presentation state only: binary writers and API payload formats stay unchanged.
+function sidecarHashMismatch() {
+  return !!(importedSidecar?.source_sha1 && model?.source_sha1 &&
+    String(importedSidecar.source_sha1).toLowerCase() !== String(model.source_sha1).toLowerCase());
+}
+function targetPath() {
+  return writeRoot && loadedSceneAsset ? writeRoot.replace(/[\\/]+$/, "") + "/" + loadedSceneAsset : "Not configured";
+}
+function updateSafetyDisplay() {
+  document.getElementById("scenePath").textContent = model?.path || "No scene loaded";
+  document.getElementById("sceneHash").textContent = model?.source_sha1 || "Unavailable";
+  const mode = document.getElementById("writeMode");
+  mode.textContent = directWritesEnabled ? "Direct writes enabled — verify staging target" : "Direct writes disabled";
+  mode.dataset.enabled = String(directWritesEnabled);
+  document.getElementById("stagedTarget").textContent = targetPath();
+  const warnings = [];
+  if (importedSidecar?.source && model && importedSidecar.source !== model.path)
+    warnings.push(`Sidecar source differs: ${importedSidecar.source}. Verify this is the intended scene.`);
+  if (sidecarHashMismatch()) warnings.push("Stale sidecar: SHA-1 does not match the loaded scene. Scene Apply is blocked. Import a sidecar matching this scene, or open its original scene and import it there.");
+  const sidecarWarning = document.getElementById("sidecarWarning");
+  sidecarWarning.textContent = warnings.join(" ");
+  sidecarWarning.hidden = !warnings.length;
+  if (model?.companion_warning) warnings.unshift(model.companion_warning);
+  if (!sceneLoading && model && loadedSceneAsset !== assetSelect.value)
+    warnings.unshift("The selected scene did not load. The viewport still shows the previous asset; Apply is disabled.");
+  const sceneWarning = document.getElementById("sceneWarning");
+  sceneWarning.textContent = warnings.join(" ");
+  sceneWarning.hidden = !warnings.length;
+}
+function applyConfirmation(action) {
+  return `${action}\n\nTarget: ${targetPath()}\nLoaded SHA-1: ${model?.source_sha1 || "unavailable"}\n\nThis writes the configured file. Verify it is a staging copy. A timestamped backup is created if the file changes.`;
+}
+function updateSelectionDisplay() {
+  const selected = placements[selectedPlacement];
+  document.getElementById("selectionName").textContent = selected?.name || "No object selected";
+  document.getElementById("selectionMeta").textContent = selected
+    ? `${selected.native ? "Native scene object" : "Custom object"} · ${selected.kind}${selected.runtime_id != null ? ` · Runtime #${Number(selected.runtime_id).toString(16)}` : " · Not yet applied"}`
+    : "Choose an object above or create one using the properties below.";
+}
+// Existing status writers feed consistent, accessible feedback without changing their handlers.
+for (const id of ["placementStatus", "writeStatus", "eventStatus"]) {
+  const el = document.getElementById(id);
+  const update = () => {
+    const message = el.textContent;
+    el.dataset.tone = /fail|error|invalid|must be|cannot|could not|not a soul-re/i.test(message) ? "error"
+      : /warning|does not match|differ|disabled|removal|only object|unavailable/i.test(message) ? "warning"
+      : /applied|synchronized|saved|already matches|updated|duplicated|no .*changes|no changes/i.test(message) ? "success" : "info";
+  };
+  new MutationObserver(update).observe(el, {childList:true, characterData:true, subtree:true});
+  update();
+}
+objectSearchEl.addEventListener("input", renderPlacementList);
+document.getElementById("togglePanels").addEventListener("click", () => {
+  const panel = document.getElementById("scenePanels");
+  panel.hidden = !panel.hidden;
+  document.getElementById("app").classList.toggle("panels-hidden", panel.hidden);
+  document.getElementById("togglePanels").setAttribute("aria-expanded", String(!panel.hidden));
+});
+if (window.matchMedia("(max-width: 1200px)").matches) document.getElementById("togglePanels").click();
 let view = { yaw: 0.75, pitch: 0.7, distance: 2.7, panX: 0, panY: 0, target: [0, 0, 0], scale: 1 };
 let drag = null;
 let dragMoved = false;
@@ -292,9 +509,11 @@ function putAttribute(buffer, location, size) { gl.bindBuffer(gl.ARRAY_BUFFER, b
 function colorForHeight(height, min, max) { const t = Math.max(0, Math.min(1, (height-min)/Math.max(max-min,1))); return [0.13+0.25*t, 0.34+0.45*t, 0.32+0.45*t]; }
 function markerColor(kind) { return kind === "intro" ? [0.95,0.32,0.34] : kind === "plan" ? [0.35,0.65,0.95] : [0.98,0.78,0.25]; }
 function objectColor(kind) { return kind === "spawn" ? [0.35,0.95,0.65] : kind === "trigger" ? [0.95,0.45,0.8] : kind === "light" ? [1.0,0.78,0.25] : [0.45,0.85,1.0]; }
-function clearBuffers() { for (const b of [geometryBuffer,colorBuffer,uvBuffer,indexBuffer,markerBuffer,markerColorBuffer,objectBuffer,objectColorBuffer,objectMeshBuffer,objectMeshColorBuffer,objectMeshIndexBuffer]) if (b) gl.deleteBuffer(b); for (const group of textureGroups) if (group.indexBuffer) gl.deleteBuffer(group.indexBuffer); for (const texture of loadedTextures.values()) gl.deleteTexture(texture); geometryBuffer=colorBuffer=uvBuffer=indexBuffer=markerBuffer=markerColorBuffer=objectBuffer=objectColorBuffer=objectMeshBuffer=objectMeshColorBuffer=objectMeshIndexBuffer=null; textureGroups=[]; loadedTextures=new Map(); markerCount=0; indexCount=0; objectLineCount=0; objectPointCount=0; objectMeshIndexCount=0; texturePreviewEl.hidden=true; texturePreviewEl.removeAttribute("src"); }
+function clearBuffers() { for (const b of [geometryBuffer,colorBuffer,uvBuffer,indexBuffer,markerBuffer,markerColorBuffer,portalBuffer,portalColorBuffer,objectBuffer,objectColorBuffer,objectMeshBuffer,objectMeshColorBuffer,objectMeshIndexBuffer]) if (b) gl.deleteBuffer(b); for (const group of textureGroups) if (group.indexBuffer) gl.deleteBuffer(group.indexBuffer); if (untexturedIndexBuffer) { gl.deleteBuffer(untexturedIndexBuffer); untexturedIndexBuffer=null; untexturedIndexCount=0; } for (const texture of loadedTextures.values()) gl.deleteTexture(texture); geometryBuffer=colorBuffer=uvBuffer=indexBuffer=markerBuffer=markerColorBuffer=portalBuffer=portalColorBuffer=objectBuffer=objectColorBuffer=objectMeshBuffer=objectMeshColorBuffer=objectMeshIndexBuffer=null; textureGroups=[]; loadedTextures=new Map(); markerCount=0; portalVertexCount=0; indexCount=0; objectLineCount=0; objectPointCount=0; objectMeshIndexCount=0; texturePreviewEl.hidden=true; texturePreviewEl.removeAttribute("src"); }
 function localPosition(x, y, z) { return [(x-model.center[0])/model.scale, (z-model.center[2])/model.scale, (y-model.center[1])/model.scale]; }
 function rawPosition(local) { return [local[0]*model.scale+model.center[0], local[2]*model.scale+model.center[1], local[1]*model.scale+model.center[2]]; }
+function projectLocal(local) { const m=matrix(), x=m[0]*local[0]+m[4]*local[1]+m[8]*local[2]+m[12], y=m[1]*local[0]+m[5]*local[1]+m[9]*local[2]+m[13], w=m[3]*local[0]+m[7]*local[1]+m[11]*local[2]+m[15]; if(Math.abs(w)<1e-7)return null; const rect=canvas.getBoundingClientRect(); return [rect.left+(x/w+1)*0.5*rect.width,rect.top+(1-y/w)*0.5*rect.height]; }
+function pickPlacement(clientX,clientY) { if(!model||!placements.length)return -1; let best=-1,bestDistance=22; for(let i=0;i<placements.length;i++){const item=placements[i],screen=projectLocal(localPosition(item.x,item.y,item.z)); if(!screen)continue; const distance=Math.hypot(clientX-screen[0],clientY-screen[1]); if(distance<bestDistance){bestDistance=distance;best=i;}} return best; }
 function mulAffine(a,b) {
   return [
     a[0]*b[0]+a[1]*b[4]+a[2]*b[8], a[0]*b[1]+a[1]*b[5]+a[2]*b[9], a[0]*b[2]+a[1]*b[6]+a[2]*b[10], a[0]*b[3]+a[1]*b[7]+a[2]*b[11]+a[3],
@@ -335,8 +554,8 @@ function skinnedVertex(object, index, animation, frameIndex) {
 function rebuildPlacementBuffers() {
   for (const b of [objectBuffer,objectColorBuffer,objectMeshBuffer,objectMeshColorBuffer,objectMeshIndexBuffer]) if (b) gl.deleteBuffer(b);
   const positions=[], colors=[], meshPositions=[], meshColors=[], meshIndices=[]; const size=.035;
-  for (const p of placements) { const q=localPosition(p.x,p.y,p.z), c=objectColor(p.kind); positions.push(q[0]-size,q[1],q[2], q[0]+size,q[1],q[2], q[0],q[1]-size,q[2], q[0],q[1]+size,q[2], q[0],q[1],q[2]-size, q[0],q[1],q[2]+size); for(let i=0;i<6;i++) colors.push(c[0],c[1],c[2]); }
-  for (const p of placements) { const q=localPosition(p.x,p.y,p.z), c=objectColor(p.kind); positions.push(q[0],q[1],q[2]); colors.push(c[0],c[1],c[2]); }
+  for (const p of placements) { const q=localPosition(p.x,p.y,p.z), c=p===placements[selectedPlacement]?[1,.85,.35]:objectColor(p.kind); positions.push(q[0]-size,q[1],q[2], q[0]+size,q[1],q[2], q[0],q[1]-size,q[2], q[0],q[1]+size,q[2], q[0],q[1],q[2]-size, q[0],q[1],q[2]+size); for(let i=0;i<6;i++) colors.push(c[0],c[1],c[2]); }
+  for (const p of placements) { const q=localPosition(p.x,p.y,p.z), c=p===placements[selectedPlacement]?[1,.85,.35]:objectColor(p.kind); positions.push(q[0],q[1],q[2]); colors.push(c[0],c[1],c[2]); }
   for (const p of placements) {
     const object = p.asset ? objectAssets.get(p.asset) : null;
     if (!object) continue;
@@ -366,7 +585,7 @@ async function ensureObjectAssets() {
   const needed=[...new Set(placements.map(p=>p.asset).filter(Boolean))];
   for (const path of needed) if (!objectAssets.has(path)) {
     try { objectAssets.set(path,await fetchJson(`/api/object?path=${encodeURIComponent(path)}`)); }
-    catch(e) { statusEl.textContent=`Object load failed: ${e.message}`; }
+    catch(e) { const notice=document.getElementById("assetPreviewStatus"); notice.hidden=false; notice.textContent=`Mesh preview unavailable for ${path}. Placement markers remain visible. Check the object asset root.`; notice.title=e.message; notice.dataset.tone="warning"; }
   }
   rebuildPlacementBuffers();
 }
@@ -438,23 +657,40 @@ async function loadModelTextures(data, activeModel) {
   const groups=textureGroups.slice();
   for (const group of groups) {
     try {
-      const image=await new Promise((resolve,reject)=>{ const element=new Image(); element.onload=()=>resolve(element); element.onerror=()=>reject(new Error(`could not load ${group.path}`)); element.src=`/api/texture-image?path=${encodeURIComponent(group.path)}`; });
+      const image=await new Promise((resolve,reject)=>{ const element=new Image(); element.onload=()=>resolve(element); element.onerror=()=>reject(new Error(`could not load ${group.path}`)); element.src=group.url||`/api/texture-image?path=${encodeURIComponent(group.path)}`; });
       if (model!==activeModel) return;
       const texture=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,texture); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE); gl.bindTexture(gl.TEXTURE_2D,null);
       group.texture=texture; loadedTextures.set(group.path,texture);
-      if (texturePreviewEl.hidden) { texturePreviewEl.src=`/api/texture-image?path=${encodeURIComponent(group.path)}`; texturePreviewEl.hidden=false; texturePreviewEl.alt=group.path; }
+      if (texturePreviewEl.hidden) { texturePreviewEl.src=group.url||`/api/texture-image?path=${encodeURIComponent(group.path)}`; texturePreviewEl.hidden=false; texturePreviewEl.alt=group.path; }
     } catch(e) { console.warn(e); }
   }
-  if (model===activeModel && groups.some(group=>group.texture)) statusEl.textContent=`${data.vertices.length.toLocaleString()} verts / textured SRM`;
+  if (model===activeModel && groups.some(group=>group.texture)) statusEl.textContent=`${data.vertices.length.toLocaleString()} verts / ${groups.filter(group=>group.texture).length} textures loaded`;
 }
 function renderPlacementList() {
-  placementsEl.innerHTML=placements.length ? placements.map((p,i)=>`<div class="placement ${i===selectedPlacement?"selected":""}" data-index="${i}"><b>${escapeHtml(p.name)}</b> <span style="color:var(--accent)">${escapeHtml(p.kind)}</span><div class="placement-pos">(${p.x}, ${p.y}, ${p.z})${p.asset?`<br>${escapeHtml(p.asset)}`:""}${p.animation?`<br>▶ ${escapeHtml(p.animation)}`:""}</div></div>`).join("") : '<div class="placement">No custom placements.</div>';
-  for (const el of placementsEl.querySelectorAll(".placement[data-index]")) el.addEventListener("click",()=>selectPlacement(Number(el.dataset.index)));
+  const query = objectSearchEl.value.trim().toLowerCase();
+  const visible = placements.map((p,i)=>({p,i})).filter(({p})=>
+    [p.name,p.asset,p.runtime_name,p.kind,p.native ? "native" : "custom",p.runtime_id,
+      p.runtime_id != null ? Number(p.runtime_id).toString(16) : ""].join(" ").toLowerCase().includes(query));
+  const focusedIndex = placementsEl.contains(document.activeElement) ? document.activeElement.dataset.index : null;
+  placementsEl.innerHTML = visible.length ? visible.map(({p,i})=>`
+    <button type="button" class="placement ${i===selectedPlacement?"selected":""}" data-index="${i}" aria-pressed="${i===selectedPlacement}">
+      <span class="placement-heading"><b>${escapeHtml(p.name)}</b><span class="badge ${p.native?"":"custom"}">${p.native?"NATIVE":"CUSTOM"}</span></span>
+      <span class="placement-pos" style="display:block">${escapeHtml(p.kind)}${p.runtime_id!=null?` · #${Number(p.runtime_id).toString(16)}`:""} · ${p.x}, ${p.y}, ${p.z} · ${Number(p.rotation||0)}°${p.asset?`<br>${escapeHtml(p.asset)}`:""}</span>
+    </button>`).join("") : `<div class="placement help">${placements.length?"No objects match your search.":"No scene objects. Use Place at center to create one."}</div>`;
+  document.getElementById("objectCount").textContent = query ? `${visible.length} / ${placements.length}` : `${placements.length} objects`;
+  for (const el of placementsEl.querySelectorAll(".placement[data-index]"))
+    el.addEventListener("click",()=>selectPlacement(Number(el.dataset.index)));
+  if (focusedIndex !== null) placementsEl.querySelector(`[data-index="${focusedIndex}"]`)?.focus({preventScroll:true});
+  updateSelectionDisplay();
 }
-function selectPlacement(index) { selectedPlacement=index; const p=placements[index]; if(p){objectTypeEl.value=p.kind;objectAssetEl.value=p.asset||"";animationAssetEl.value=p.animation||"";objectNameEl.value=p.name;objectXEl.value=p.x;objectYEl.value=p.y;objectZEl.value=p.z;} renderPlacementList(); }
-function readPlacementForm() { return {kind:objectTypeEl.value,asset:objectAssetEl.value,animation:animationAssetEl.value,name:objectNameEl.value.trim()||`custom_object_${placements.length}`,x:Number(objectXEl.value),y:Number(objectYEl.value),z:Number(objectZEl.value),rotation:0,scale:1}; }
-function writePlacementFromForm() { if(selectedPlacement<0||!placements[selectedPlacement]) return; const p=readPlacementForm(); if(![p.x,p.y,p.z].every(Number.isFinite)) return; placements[selectedPlacement]=p; rebuildPlacementBuffers(); renderPlacementList(); updateAssetControls(); void ensureObjectAssets(); void ensureAnimationAssets(); }
-function addPlacement(position) { const p=readPlacementForm(); p.x=Math.round(position[0]); p.y=Math.round(position[1]); p.z=Math.round(position[2]); if(!objectNameEl.value.trim()) p.name=`custom_object_${placements.length}`; placements.push(p); selectedPlacement=placements.length-1; objectXEl.value=p.x;objectYEl.value=p.y;objectZEl.value=p.z; rebuildPlacementBuffers(); renderPlacementList(); updateAssetControls(); void ensureObjectAssets(); void ensureAnimationAssets(); }
+function placementRuntimeName(value) { const text=String(value||"").trim(); if(!text)return ""; if(!/^[\x20-\x7e]+$/.test(text)||text.length>15) throw new Error("runtime object names must be printable ASCII and at most 15 bytes"); return text; }
+function normalizePlacement(raw,index) { if(!raw||typeof raw!=="object") throw new Error(`placement ${index+1} is not an object`); const p={kind:["object","spawn","trigger","light"].includes(raw.kind)?raw.kind:"object",asset:String(raw.asset||""),animation:String(raw.animation||""),name:String(raw.name||`custom_object_${index}`),runtime_name:placementRuntimeName(raw.runtime_name),x:Number(raw.x),y:Number(raw.y),z:Number(raw.z),rotation:Number(raw.rotation||0),scale:Number(raw.scale||1),native:!!raw.native}; if(raw.runtime_id!=null){p.runtime_id=Number(raw.runtime_id);if(!Number.isInteger(p.runtime_id))throw new Error(`placement ${index+1} has an invalid runtime ID`);} if(Array.isArray(raw.rotation_xyz)&&raw.rotation_xyz.length===3)p.rotation_xyz=raw.rotation_xyz.map(Number); if(Number.isInteger(raw.flags))p.flags=Number(raw.flags); if(raw.table_kind)p.table_kind=String(raw.table_kind); if(Number.isInteger(raw.table_index))p.table_index=Number(raw.table_index); if(Array.isArray(raw.color))p.color=raw.color.map(Number); if(Number.isInteger(raw.radius))p.radius=Number(raw.radius); if(![p.x,p.y,p.z,p.rotation,p.scale].every(Number.isFinite)||p.scale<=0)throw new Error(`placement ${index+1} has invalid numeric fields`); return p; }
+function selectPlacement(index) { selectedPlacement=index; const p=placements[index]; if(p){objectTypeEl.value=p.kind; if(p.asset&&!Array.from(objectAssetEl.options).some(o=>o.value===p.asset)){const option=document.createElement("option");option.value=p.asset;option.textContent=`${p.asset} (scene)`;objectAssetEl.appendChild(option);} if(p.animation&&!Array.from(animationAssetEl.options).some(o=>o.value===p.animation)){const option=document.createElement("option");option.value=p.animation;option.textContent=`${p.animation} (scene)`;animationAssetEl.appendChild(option);} objectAssetEl.value=p.asset||"";animationAssetEl.value=p.animation||"";objectNameEl.value=p.name;objectRuntimeNameEl.value=p.runtime_name||"";objectXEl.value=p.x;objectYEl.value=p.y;objectZEl.value=p.z;objectRotationEl.value=Number(p.rotation||0);} renderPlacementList(); rebuildPlacementBuffers(); updateAssetControls(); }
+function readPlacementForm() { const existing=selectedPlacement>=0?placements[selectedPlacement]:null; return normalizePlacement({kind:objectTypeEl.value,asset:objectAssetEl.value,animation:animationAssetEl.value,name:objectNameEl.value.trim()||`custom_object_${placements.length}`,runtime_name:objectRuntimeNameEl.value,x:Number(objectXEl.value),y:Number(objectYEl.value),z:Number(objectZEl.value),rotation:Number(objectRotationEl.value||0),rotation_xyz:existing?.rotation_xyz,flags:existing?.flags,runtime_id:existing?.runtime_id,native:existing?.native,table_kind:existing?.table_kind,table_index:existing?.table_index,color:existing?.color,radius:existing?.radius,scale:1},selectedPlacement<0?placements.length:selectedPlacement); }
+function writePlacementFromForm() { if(selectedPlacement<0||!placements[selectedPlacement]) return false; try { const p=readPlacementForm(); p.runtime_id=placements[selectedPlacement].runtime_id; placements[selectedPlacement]=p; rebuildPlacementBuffers(); renderPlacementList(); updateAssetControls(); void ensureObjectAssets(); void ensureAnimationAssets(); return true; } catch(e) { placementStatusEl.textContent=e.message; return false; } }
+function nudgeSelected(dx,dy,dz,drotation) { if(selectedPlacement<0||!placements[selectedPlacement]){placementStatusEl.textContent="Select an object first.";return;} const p=placements[selectedPlacement]; p.x=Math.max(-32768,Math.min(32767,Math.round(Number(p.x)+dx))); p.y=Math.max(-32768,Math.min(32767,Math.round(Number(p.y)+dy))); p.z=Math.max(-32768,Math.min(32767,Math.round(Number(p.z)+dz))); p.rotation=Number(p.rotation||0)+drotation; placements[selectedPlacement]=p; objectXEl.value=p.x;objectYEl.value=p.y;objectZEl.value=p.z;objectRotationEl.value=p.rotation; rebuildPlacementBuffers(); renderPlacementList(); updateAssetControls(); }
+function controlStep(input,fallback) { const value=Number(input.value); return Number.isFinite(value)&&value>0?value:fallback; }
+function addPlacement(position) { try { const p=readPlacementForm(); p.x=Math.round(position[0]); p.y=Math.round(position[1]); p.z=Math.round(position[2]); if(!objectNameEl.value.trim())p.name=`custom_object_${placements.length}`; delete p.runtime_id; p.native=false; placements.push(p); selectedPlacement=placements.length-1; objectXEl.value=p.x;objectYEl.value=p.y;objectZEl.value=p.z; rebuildPlacementBuffers(); renderPlacementList(); updateAssetControls(); void ensureObjectAssets(); void ensureAnimationAssets(); } catch(e) { placementStatusEl.textContent=e.message; } }
 function rebuildMarkerBuffers() {
   if(markerBuffer) gl.deleteBuffer(markerBuffer); if(markerColorBuffer) gl.deleteBuffer(markerColorBuffer);
   const positions=[], colors=[];
@@ -463,10 +699,27 @@ function rebuildMarkerBuffers() {
   markerBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,markerBuffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(positions),gl.STATIC_DRAW);
   markerColorBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,markerColorBuffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(colors),gl.STATIC_DRAW);
 }
+function rebuildPortalBuffers() {
+  if (portalBuffer) gl.deleteBuffer(portalBuffer); if (portalColorBuffer) gl.deleteBuffer(portalColorBuffer);
+  const positions=[], colors=[];
+  const addTriangle=(triangle,color)=>{ for(let i=0;i<3;i++){ const a=localPosition(...triangle[i]), b=localPosition(...triangle[(i+1)%3]); positions.push(...a,...b); colors.push(...color,...color); } };
+  for(const portal of (model?.portals||[])){ addTriangle(portal.t1,[.15,.9,1]); addTriangle(portal.t2,[1,.65,.2]); }
+  portalVertexCount=positions.length/3;
+  portalBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,portalBuffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(positions),gl.STATIC_DRAW);
+  portalColorBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,portalColorBuffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(colors),gl.STATIC_DRAW);
+}
 function renderMarkerList() {
   const list=model?.markers||[];
   markersEl.innerHTML=list.length?list.map((m,i)=>`<div class="marker ${i===selectedMarker?"selected":""}" data-index="${i}"><span class="marker-kind">${escapeHtml(m.kind)}</span>${escapeHtml(m.name)}<div class="marker-pos">(${m.x}, ${m.y}, ${m.z})</div></div>`).join(""): '<div class="marker">No markers in this asset.</div>';
   for(const el of markersEl.querySelectorAll(".marker[data-index]"))el.addEventListener("click",()=>selectMarker(Number(el.dataset.index)));
+}
+function renderPortalList() {
+  const list=model?.portals||[];
+  portalsEl.innerHTML=list.length?list.map(p=>`<div class="marker"><span class="marker-kind">portal</span>${escapeHtml(p.name||`#${p.index}`)}<div class="marker-pos">sig ${p.signal_id} · stream ${p.stream_id}<br>${escapeHtml(JSON.stringify(p.bounds_min))} → ${escapeHtml(JSON.stringify(p.bounds_max))}</div></div>`).join(""):'<div class="marker">No portals in this asset.</div>';
+}
+function renderBspList() {
+  const list=model?.bsp_roots||[];
+  bspRootsEl.innerHTML=list.length?list.map(root=>`<div class="marker"><span class="marker-kind">tree ${root.index}</span>root 0x${Number(root.root_relative).toString(16)}<div class="marker-pos">sphere ${escapeHtml(JSON.stringify(root.sphere))}<br>box ${escapeHtml(JSON.stringify(root.box))}</div></div>`).join(""):'<div class="marker">No BSP roots in this asset.</div>';
 }
 function selectMarker(index) { selectedMarker=index; const m=model?.markers?.[index]; if(m){markerXEl.value=m.x;markerYEl.value=m.y;markerZEl.value=m.z;} renderMarkerList(); }
 function writeMarkerFromForm() { if(selectedMarker<0||!model?.markers?.[selectedMarker])return;const x=Number(markerXEl.value),y=Number(markerYEl.value),z=Number(markerZEl.value);if(![x,y,z].every(Number.isInteger)||![x,y,z].every(v=>v>=-32768&&v<=32767))return;Object.assign(model.markers[selectedMarker],{x,y,z});rebuildMarkerBuffers();renderMarkerList(); }
@@ -482,52 +735,98 @@ function rebuildMainGeometryFrame(frameIndex) {
   gl.bindBuffer(gl.ARRAY_BUFFER,geometryBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(positions),gl.DYNAMIC_DRAW); sraFrame=safeFrame;
 }
 function loadModel(data) {
+  const sameAsset=!!model&&model.path===data.path;
+  document.getElementById("assetPreviewStatus").hidden=true;
   clearBuffers(); model=data; animationClock=0; lastAnimationFrame=-1; sraAnimation=null; sraPlaying=false; sraFrame=-1; sraPlayEl.disabled=true; sraPlayEl.textContent="Play SRA clip";
   const s=data.summary, min=s.bounds_min, max=s.bounds_max;
   const cx=(min[0]+max[0])/2, cy=(min[1]+max[1])/2, cz=(min[2]+max[2])/2;
   const scale=Math.max(max[0]-min[0],max[1]-min[1],max[2]-min[2],1)/2;
   model.center=[cx,cy,cz]; model.scale=scale; model.localVertices=[];
-  placements=[]; selectedPlacement=-1; placementMode=false; placeModeEl.textContent="Click to place"; renderPlacementList(); selectedMarker=-1;
+  if(!sameAsset) { importedSidecar=null; objectSearchEl.value=""; placements=[...(data.scene_objects||[]),...(data.scene_lights||[])].map((p,i)=>normalizePlacement(p,i)); removedRuntimeIds=[]; selectedPlacement=placements.length?0:-1; placementMode=false; placeModeEl.textContent="Click to place"; if(selectedPlacement>=0)selectPlacement(selectedPlacement); else renderPlacementList(); }
+  selectedMarker=-1;
   view.scale=scale; view.target=[0,0,0]; view.panX=0; view.panY=0; view.distance=2.7; view.yaw=.75; view.pitch=.7;
   const positions=[], colors=[];
   const uvs=[];
-  for (let vertexIndex=0; vertexIndex<data.vertices.length; vertexIndex++) { const v=data.vertices[vertexIndex], q=[(v[0]-cx)/scale, (v[2]-cz)/scale, (v[1]-cy)/scale]; model.localVertices.push(q); positions.push(q[0],q[1],q[2]); const c=colorForHeight(v[2],min[2],max[2]); colors.push(c[0],c[1],c[2]); const uv=data.uvs?.[vertexIndex]||[0,0]; uvs.push(uv[0],uv[1]); }
   const indices=[];
-  for (const f of data.faces) if (f[0]<data.vertices.length && f[1]<data.vertices.length && f[2]<data.vertices.length) indices.push(f[0],f[1],f[2]);
+  for (let vertexIndex=0; vertexIndex<data.vertices.length; vertexIndex++) { const v=data.vertices[vertexIndex], q=[(v[0]-cx)/scale, (v[2]-cz)/scale, (v[1]-cy)/scale]; model.localVertices.push(q); }
+  // Terrain texture coordinates are face-owned. Expand only those meshes so
+  // one shared terrain vertex can carry different UVs on adjacent faces.
+  const faceUvs=Array.isArray(data.face_uvs)&&data.face_uvs.length===data.faces.length;
+  if (faceUvs) {
+    for (let faceIndex=0; faceIndex<data.faces.length; faceIndex++) {
+      const f=data.faces[faceIndex], uvFace=data.face_uvs[faceIndex];
+      if (f[0]>=data.vertices.length||f[1]>=data.vertices.length||f[2]>=data.vertices.length||!Array.isArray(uvFace)||uvFace.length!==3) continue;
+      for (let corner=0; corner<3; corner++) { const v=data.vertices[f[corner]], q=[(v[0]-cx)/scale,(v[2]-cz)/scale,(v[1]-cy)/scale], c=colorForHeight(v[2],min[2],max[2]), uv=uvFace[corner]||[0,0]; positions.push(q[0],q[1],q[2]); colors.push(c[0],c[1],c[2]); uvs.push(Number(uv[0])||0,Number(uv[1])||0); }
+      const base=positions.length/3-3; indices.push(base,base+1,base+2);
+    }
+  } else {
+    for (let vertexIndex=0; vertexIndex<data.vertices.length; vertexIndex++) { const v=data.vertices[vertexIndex], q=model.localVertices[vertexIndex], c=colorForHeight(v[2],min[2],max[2]); positions.push(q[0],q[1],q[2]); colors.push(c[0],c[1],c[2]); const uv=data.uvs?.[vertexIndex]||[0,0]; uvs.push(uv[0],uv[1]); }
+    for (const f of data.faces) if (f[0]<data.vertices.length && f[1]<data.vertices.length && f[2]<data.vertices.length) indices.push(f[0],f[1],f[2]);
+  }
   indexCount=indices.length;
   geometryBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,geometryBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(positions),gl.STATIC_DRAW);
   colorBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,colorBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(colors),gl.STATIC_DRAW);
   uvBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,uvBuffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(uvs),gl.STATIC_DRAW);
-  indexBuffer=gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint32Array(indices),gl.STATIC_DRAW);
-  // WebGL1 does not guarantee uint32 element indices. Soul Reaver area meshes are small enough for 16-bit indices.
-  if (data.vertices.length > 65535) throw new Error("mesh exceeds WebGL1 index range");
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(indices),gl.STATIC_DRAW);
-  if (Array.isArray(data.texture_files) && data.texture_files.length && Array.isArray(data.material_indices)) {
-    const grouped=new Map();
+  // Terrain is expanded to three vertices per face, so check the expanded
+  // count. WebGL1 needs OES_element_index_uint for indices above 65535.
+  const drawnVertexCount=positions.length/3;
+  if (drawnVertexCount > 65535 && !uintIndexExtension) throw new Error(`mesh has ${drawnVertexCount} vertices; this browser lacks 32-bit WebGL indices`);
+  terrainIndexType=drawnVertexCount > 65535 ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
+  indexBuffer=gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,terrainIndexArray(indices),gl.STATIC_DRAW);
+  untexturedIndexBuffer=indexBuffer; untexturedIndexCount=indexCount;
+  if (Array.isArray(data.texture_files) && data.texture_files.length && (Array.isArray(data.face_material_indices) || Array.isArray(data.material_indices))) {
+    const grouped=new Map(), untextured=[];
     for (let faceIndex=0; faceIndex<data.faces.length; faceIndex++) {
-      const face=data.faces[faceIndex], material=Math.max(0,Number(data.material_indices[face[0]]||1)-1);
+      const face=data.faces[faceIndex], material=Array.isArray(data.face_material_indices) ? Number(data.face_material_indices[faceIndex]) : Math.max(0,Number(data.material_indices[face[0]]||1)-1);
+      if (material<0 || !Number.isFinite(material) || !data.texture_files[material]) { if (faceUvs) { const base=faceIndex*3; untextured.push(base,base+1,base+2); } else untextured.push(face[0],face[1],face[2]); continue; }
       if (!grouped.has(material)) grouped.set(material,[]);
-      const group=grouped.get(material); group.push(face[0],face[1],face[2]);
+      const group=grouped.get(material);
+      if (faceUvs) { const base=faceIndex*3; group.push(base,base+1,base+2); }
+      else group.push(face[0],face[1],face[2]);
     }
-    textureGroups=[...grouped.entries()].map(([material,groupIndices])=>({material, path:data.texture_files[material], indices:groupIndices, indexBuffer:null, texture:null})).filter(group=>group.path);
-    for (const group of textureGroups) { group.indexBuffer=gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,group.indexBuffer); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(group.indices),gl.STATIC_DRAW); }
+    textureGroups=[...grouped.entries()].map(([material,groupIndices])=>({material, path:data.texture_files[material], url:Array.isArray(data.texture_urls)?data.texture_urls[material]:"", indices:groupIndices, indexBuffer:null, texture:null})).filter(group=>group.path);
+    for (const group of textureGroups) { group.indexBuffer=gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,group.indexBuffer); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,terrainIndexArray(group.indices),gl.STATIC_DRAW); }
+    untexturedIndexCount=untextured.length; untexturedIndexBuffer=untextured.length?gl.createBuffer():null;
+    if (untexturedIndexBuffer) { gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,untexturedIndexBuffer); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,terrainIndexArray(untextured),gl.STATIC_DRAW); }
     void loadModelTextures(data, model);
   }
   rebuildMarkerBuffers();
+  rebuildPortalBuffers();
+  rebuildPlacementBuffers();
+  void ensureObjectAssets();
+  void ensureAnimationAssets();
   titleEl.textContent=data.path;
   statusEl.textContent=`${data.vertices.length.toLocaleString()} verts / ${data.faces.length.toLocaleString()} faces`;
-  document.getElementById("stats").innerHTML = `<div class="stat"><span>Type</span><span>${escapeHtml(data.asset_type||"asset")}</span></div><div class="stat"><span>Vertices</span><span>${data.vertices.length.toLocaleString()}</span></div><div class="stat"><span>Faces</span><span>${data.faces.length.toLocaleString()}</span></div><div class="stat"><span>Markers</span><span>${data.markers.length.toLocaleString()}</span></div>${data.summary.bone_count?`<div class="stat"><span>Bones</span><span>${data.summary.bone_count}</span></div>`:""}${textureGroups.length?`<div class="stat"><span>Textures</span><span>${textureGroups.length}</span></div>`:""}<div class="stat"><span>Bounds</span><span>${min.join(", ")} → ${max.join(", ")}</span></div>`;
+  document.getElementById("stats").innerHTML = `<div class="stat"><span>Type</span><span>${escapeHtml(data.asset_type||"asset")}</span></div><div class="stat"><span>Vertices</span><span>${data.vertices.length.toLocaleString()}</span></div><div class="stat"><span>Faces</span><span>${data.faces.length.toLocaleString()}</span></div><div class="stat"><span>Objects</span><span>${(data.scene_objects||[]).length.toLocaleString()}</span></div><div class="stat"><span>Lights</span><span>${(data.scene_lights||[]).length.toLocaleString()}</span></div><div class="stat"><span>Markers</span><span>${data.markers.length.toLocaleString()}</span></div><div class="stat"><span>Portals</span><span>${(data.portals||[]).length.toLocaleString()}</span></div>${data.summary.bone_count?`<div class="stat"><span>Bones</span><span>${data.summary.bone_count}</span></div>`:""}${textureGroups.length?`<div class="stat"><span>Textures</span><span>${textureGroups.length}</span></div>`:""}<div class="stat"><span>Bounds</span><span>${min.join(", ")} → ${max.join(", ")}</span></div>${data.source_sha1?`<div class="stat"><span>SHA-1</span><span>${escapeHtml(data.source_sha1)}</span></div>`:""}${data.companion_warning?`<div class="stat"><span>Warning</span><span>${escapeHtml(data.companion_warning)}</span></div>`:""}`;
   renderMarkerList();
+  renderPortalList();
+  renderBspList();
   updateAssetControls();
 }
 function updateAssetControls() {
   const isScene = model && ["drm", "pcm-level"].includes(model.asset_type);
+  const ready = !sceneLoading && loadedSceneAsset === assetSelect.value;
+  const hasSelection = selectedPlacement >= 0 && !!placements[selectedPlacement];
   for (const el of [markerXEl, markerYEl, markerZEl]) el.disabled = !isScene || !model?.markers?.length;
   exportSceneEl.disabled = !model;
-  applyMarkersEl.disabled = !directWritesEnabled || !isScene;
-  applyPlacementsEl.disabled = !directWritesEnabled || !isScene || !placements.length || placements.some(p=>p.kind!=="object");
-  applyEventsEl.disabled = !directWritesEnabled || !eventReport || selectedEventIndex < 0;
-  if (model && !isScene) writeStatusEl.textContent = "PCM object loaded. Direct marker writes apply to scene assets only.";
+  applyMarkersEl.disabled = !directWritesEnabled || !isScene || !ready;
+  applyPlacementsEl.disabled = !directWritesEnabled || !isScene || !ready || sidecarHashMismatch() || (!placements.length && !removedRuntimeIds.length) || placements.some(p=>!['object','light'].includes(p.kind));
+  applyPlacementEditEl.disabled = !hasSelection;
+  for (const id of ["duplicatePlacement", "deletePlacement"]) document.getElementById(id).disabled = !hasSelection;
+  for (const id of ["placeCenter", "placeMode", "exportPlacements", "importPlacements"]) document.getElementById(id).disabled = !model || !ready;
+  transformButtonEls.forEach(button=>button.disabled=!hasSelection);
+  applyEventsEl.disabled = !directWritesEnabled || !isScene || !ready || !eventReport || selectedEventIndex < 0;
+  const help = !directWritesEnabled ? "Read-only session. Export JSON to save edits; Apply requires --write-root."
+    : !ready ? "Wait for the selected scene to load before applying."
+    : !isScene ? "Apply requires a DRM or PCM scene; this asset is an object preview."
+    : sidecarHashMismatch() ? "Apply blocked: imported sidecar hash does not match."
+    : placements.some(p=>!['object','light'].includes(p.kind)) ? "Only object and light placements can be applied."
+    : !placements.length && !removedRuntimeIds.length ? "No objects or queued removals to apply."
+    : `${placements.filter(p=>p.kind==='object').length} objects · ${placements.filter(p=>p.kind==='light').length} lights · ${removedRuntimeIds.length} queued removals. Review the target before Apply.`;
+  document.getElementById("applyHelp").textContent = help;
+  applyPlacementsEl.title = help;
+  updateSelectionDisplay();
+  updateSafetyDisplay();
 }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 function selectedEvent() { return eventReport?.events?.find(e=>Number(e.index)===selectedEventIndex)||null; }
@@ -554,23 +853,34 @@ function renderEventEditor() {
   updateAssetControls();
 }
 async function loadEventReport(path) {
+  const version=sceneLoadVersion;
   eventReport=null; selectedEventIndex=-1; selectedEventAction=0; eventSelectEl.disabled=true; eventEditorEl.hidden=true; eventStatusEl.textContent="Loading events…"; updateAssetControls();
   try {
     const report=await fetchJson(`/api/events?path=${encodeURIComponent(path)}`);
+    if(version!==sceneLoadVersion || path!==loadedSceneAsset)return;
     eventReport=report; const events=report.events||[];
     eventSelectEl.innerHTML=events.length?events.map(e=>`<option value="${e.index}">#${e.index} event ${e.event_number} — ${escapeHtml(e.mode)}</option>`).join(""):"<option value=\"\">No events</option>";
     eventSelectEl.disabled=!events.length; selectedEventIndex=events.length?Number(events[0].index):-1; eventStatusEl.textContent=events.length?`${events.length} event definitions loaded. Changes are fixed-size only for now.`:"This asset contains no puzzle/event table."; renderEventEditor();
-  } catch(e) { eventStatusEl.textContent=`Event load failed: ${e.message}`; }
+  } catch(e) { if(version===sceneLoadVersion)eventStatusEl.textContent=`Event load failed: ${e.message}`; }
 }
 function drawMainGeometry() {
+  // Bind the terrain vertex attributes before textured groups.  WebGL keeps
+  // attribute pointers between draw calls; without this, the first textured
+  // pass could accidentally reuse an object/marker buffer and the later color
+  // fallback would hide the mistake.
+  putAttribute(geometryBuffer,positionLoc,3); putAttribute(colorBuffer,colorLoc,3); putAttribute(uvBuffer,uvLoc,2);
+  const indexType=terrainIndexType||gl.UNSIGNED_SHORT;
   for (const group of textureGroups) {
     if (!group.texture) continue;
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,group.texture); gl.uniform1i(textureLoc,0); gl.uniform1i(useTextureLoc,1); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,group.indexBuffer); gl.drawElements(gl.TRIANGLES,group.indices.length,gl.UNSIGNED_SHORT,0);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,group.texture); gl.uniform1i(textureLoc,0); gl.uniform1i(useTextureLoc,1); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,group.indexBuffer); gl.drawElements(gl.TRIANGLES,group.indices.length,indexType,0);
   }
-  // Draw a color fallback after textured groups. With the default LESS depth
-  // test, already-textured fragments reject this identical-depth pass while
-  // groups whose images are still loading remain visible.
-  gl.uniform1i(useTextureLoc,0); putAttribute(geometryBuffer,positionLoc,3); putAttribute(colorBuffer,colorLoc,3); putAttribute(uvBuffer,uvLoc,2); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.drawElements(gl.TRIANGLES,indexCount,gl.UNSIGNED_SHORT,0);
+  // Colour only what has no texture yet: faces without a material, and
+  // groups whose atlas is still loading. Redrawing every face (the old
+  // fallback) painted height colours over textures in X-ray mode, where
+  // depth writes are off.
+  gl.uniform1i(useTextureLoc,0); putAttribute(geometryBuffer,positionLoc,3); putAttribute(colorBuffer,colorLoc,3); putAttribute(uvBuffer,uvLoc,2);
+  for (const group of textureGroups) if (!group.texture) { gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,group.indexBuffer); gl.drawElements(gl.TRIANGLES,group.indices.length,indexType,0); }
+  if (untexturedIndexBuffer && untexturedIndexCount) { gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,untexturedIndexBuffer); gl.drawElements(gl.TRIANGLES,untexturedIndexCount,indexType,0); }
   gl.uniform1i(useTextureLoc,0); gl.bindTexture(gl.TEXTURE_2D,null);
 }
 function render() {
@@ -586,17 +896,49 @@ function render() {
     if (frame!==sraFrame) rebuildMainGeometryFrame(frame);
   }
   resize(); gl.enable(gl.DEPTH_TEST); gl.clearColor(.025,.045,.08,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT); if (!model) { requestAnimationFrame(render); return; }
-  gl.useProgram(program); gl.uniformMatrix4fv(matrixLoc,false,matrix()); drawMainGeometry();
-  if (wireToggle.checked) { gl.disable(gl.DEPTH_TEST); gl.lineWidth(1); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.drawElements(gl.LINE_STRIP,indexCount,gl.UNSIGNED_SHORT,0); gl.enable(gl.DEPTH_TEST); }
+  gl.useProgram(program); gl.uniformMatrix4fv(matrixLoc,false,matrix());
+  const transparentTerrain=transparentToggle.checked, insideView=insideViewToggle.checked;
+  if (transparentTerrain) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); }
+  if (insideView) { gl.enable(gl.CULL_FACE); gl.cullFace(gl.FRONT); }
+  gl.uniform1f(alphaLoc,transparentTerrain ? 0.28 : 1.0); drawMainGeometry();
+  gl.uniform1f(alphaLoc,1.0); if (insideView) gl.disable(gl.CULL_FACE); if (transparentTerrain) { gl.depthMask(true); gl.disable(gl.BLEND); }
+  if (wireToggle.checked) { gl.disable(gl.DEPTH_TEST); gl.lineWidth(1); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,indexBuffer); gl.drawElements(gl.LINE_STRIP,indexCount,terrainIndexType||gl.UNSIGNED_SHORT,0); gl.enable(gl.DEPTH_TEST); }
   if (markersToggle.checked && markerCount) { gl.disable(gl.DEPTH_TEST); putAttribute(markerBuffer,positionLoc,3); putAttribute(markerColorBuffer,colorLoc,3); gl.drawArrays(gl.POINTS,0,markerCount); gl.enable(gl.DEPTH_TEST); }
+  if (portalsToggle.checked && portalVertexCount) { gl.disable(gl.DEPTH_TEST); putAttribute(portalBuffer,positionLoc,3); putAttribute(portalColorBuffer,colorLoc,3); gl.drawArrays(gl.LINES,0,portalVertexCount); gl.enable(gl.DEPTH_TEST); }
   if (objectLineCount) { gl.disable(gl.DEPTH_TEST); gl.uniform1i(useTextureLoc,0); gl.disableVertexAttribArray(uvLoc); gl.vertexAttrib2f(uvLoc,0,0); putAttribute(objectBuffer,positionLoc,3); putAttribute(objectColorBuffer,colorLoc,3); gl.drawArrays(gl.LINES,0,objectLineCount); gl.drawArrays(gl.POINTS,objectLineCount,objectPointCount); gl.enable(gl.DEPTH_TEST); }
   if (objectMeshIndexCount) { gl.uniform1i(useTextureLoc,0); gl.disableVertexAttribArray(uvLoc); gl.vertexAttrib2f(uvLoc,0,0); putAttribute(objectMeshBuffer,positionLoc,3); putAttribute(objectMeshColorBuffer,colorLoc,3); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,objectMeshIndexBuffer); gl.drawElements(gl.TRIANGLES,objectMeshIndexCount,gl.UNSIGNED_SHORT,0); }
   requestAnimationFrame(render);
 }
+function writeHeaders() { const meta=document.querySelector('meta[name="soul-re-write-token"]'); return {"Content-Type":"application/json","X-Soul-Re-Token":meta?meta.content:""}; }
 async function fetchJson(url) { const r=await fetch(url); if (!r.ok) throw new Error(await r.text()); return await r.json(); }
-async function loadPath(path) { statusEl.textContent="Loading…"; try { loadModel(await fetchJson(`/api/asset?path=${encodeURIComponent(path)}`)); history.replaceState(null,"",`?asset=${encodeURIComponent(path)}`); await loadEventReport(path); } catch(e) { statusEl.textContent="Error"; markersEl.innerHTML=`<div class="marker">${escapeHtml(e.message)}</div>`; } }
-async function refreshWriteStatus() { try { const info=await fetchJson("/api/write-status"); directWritesEnabled=!!info.enabled; updateAssetControls(); writeStatusEl.textContent=directWritesEnabled?`Direct writes enabled: ${info.root}`:"Direct writes disabled. Restart with --write-root to enable."; } catch(e) { directWritesEnabled=false; updateAssetControls(); writeStatusEl.textContent="Direct write status unavailable."; } }
-async function init() { try { await refreshWriteStatus(); const [objectList,animationList,sraList]=await Promise.all([fetchJson("/api/object-list"),fetchJson("/api/animation-list"),fetchJson("/api/sra-list")]); objectListCache=objectList; objectAssetEl.innerHTML=`<option value="">placement marker only</option>`+objectList.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); animationAssetEl.innerHTML=`<option value="">no animation</option>`+animationList.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); sraAssetEl.innerHTML=`<option value="">choose an SRA archive</option>`+sraList.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); const preferred=sraList.find(p=>p.toLowerCase()==="morboss.sra"); if(preferred){sraAssetEl.value=preferred; await loadSraArchive(preferred);} const list=await fetchJson("/api/list"); assetSelect.innerHTML=list.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); const params=new URLSearchParams(location.search); const wanted=params.get("asset")||params.get("drm"); const initial=wanted && list.includes(wanted) ? wanted : (list.includes("city/bin/city2.drm") ? "city/bin/city2.drm" : list[0]); if(initial && !preferred){ assetSelect.value=initial; await loadPath(initial); } } catch(e) { statusEl.textContent="Error"; markersEl.innerHTML=`<div class="marker">${escapeHtml(e.message)}</div>`; } }
+async function loadPath(path) {
+  const version = ++sceneLoadVersion;
+  sceneLoading = true; statusEl.textContent="Loading…"; updateAssetControls();
+  try {
+    const data = await fetchJson(`/api/asset?path=${encodeURIComponent(path)}`);
+    if (version !== sceneLoadVersion) return;
+    loadedSceneAsset = path;
+    loadModel(data);
+    history.replaceState(null,"",`?asset=${encodeURIComponent(path)}`);
+    await loadEventReport(path);
+  } catch(e) {
+    if (version !== sceneLoadVersion) return;
+    loadedSceneAsset="";
+    statusEl.textContent="Scene load failed";
+    writeStatusEl.textContent=`Scene load failed: ${e.message}`;
+  } finally {
+    if (version === sceneLoadVersion) { sceneLoading=false; updateAssetControls(); }
+  }
+}
+async function refreshWriteStatus() {
+  try {
+    const info=await fetchJson("/api/write-status");
+    directWritesEnabled=!!info.enabled; writeRoot=info.root||"";
+    writeStatusEl.textContent=directWritesEnabled?"Direct writes enabled. Verify the configured target is a staging copy.":"Direct writes disabled. Export JSON to save edits.";
+  } catch(e) { directWritesEnabled=false; writeRoot=""; writeStatusEl.textContent="Direct write status unavailable."; }
+  updateAssetControls();
+}
+async function init() { try { await refreshWriteStatus(); const [objectList,animationList,sraList]=await Promise.all([fetchJson("/api/object-list"),fetchJson("/api/animation-list"),fetchJson("/api/sra-list")]); objectListCache=objectList; objectAssetEl.innerHTML=`<option value="">placement marker only</option>`+objectList.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); animationAssetEl.innerHTML=`<option value="">no animation</option>`+animationList.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); sraAssetEl.innerHTML=`<option value="">choose an SRA archive</option>`+sraList.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); const preferred=sraList.find(p=>p.toLowerCase()==="morboss.sra"); if(preferred){sraAssetEl.value=preferred; await loadSraArchive(preferred);} const list=await fetchJson("/api/list"); assetSelect.innerHTML=list.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join(""); const params=new URLSearchParams(location.search); const wanted=params.get("asset")||params.get("drm"); const initial=wanted && list.includes(wanted) ? wanted : (list.includes("city/bin/city2.drm") ? "city/bin/city2.drm" : list[0]); if(initial){ assetSelect.value=initial; await loadPath(initial); } } catch(e) { statusEl.textContent="Error"; markersEl.innerHTML=`<div class="marker">${escapeHtml(e.message)}</div>`; } }
 function normalize(v) { const l=Math.hypot(v[0],v[1],v[2])||1; return [v[0]/l,v[1]/l,v[2]/l]; }
 function cross(a,b) { return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]; }
 function dot(a,b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
@@ -616,9 +958,19 @@ document.getElementById("reload").addEventListener("click",()=>loadPath(assetSel
 document.getElementById("reset").addEventListener("click",()=>{ if(model){view.panX=0;view.panY=0;view.distance=2.7;view.yaw=.75;view.pitch=.7;} });
 document.getElementById("placeCenter").addEventListener("click",()=>{if(!model)return;const s=model.summary,min=s.bounds_min,max=s.bounds_max;addPlacement([(min[0]+max[0])/2,(min[1]+max[1])/2,(min[2]+max[2])/2]);});
 placeModeEl.addEventListener("click",()=>{placementMode=!placementMode;placeModeEl.textContent=placementMode?"Cancel placement":"Click to place";canvas.style.cursor=placementMode?"crosshair":"grab";});
-document.getElementById("deletePlacement").addEventListener("click",()=>{if(selectedPlacement<0)return;placements.splice(selectedPlacement,1);selectedPlacement=Math.min(selectedPlacement,placements.length-1);if(selectedPlacement>=0)selectPlacement(selectedPlacement);else{rebuildPlacementBuffers();renderPlacementList();}updateAssetControls();});
-[objectTypeEl,objectAssetEl,animationAssetEl,objectNameEl,objectXEl,objectYEl,objectZEl].forEach(el=>el.addEventListener("input",writePlacementFromForm));
+document.getElementById("deletePlacement").addEventListener("click",()=>{if(selectedPlacement<0||!placements[selectedPlacement])return;const candidate=placements[selectedPlacement];if(candidate.kind==='light'){placementStatusEl.textContent="Light deletion is not supported yet; use the position/color fields instead.";return;}if(candidate.native&&!window.confirm(`Delete native object "${candidate.name}" (runtime #${Number(candidate.runtime_id).toString(16)})?\n\nThis queues removal of an original scene object. The file changes only when you Apply scene to AREA. Export JSON first if you need to keep these edits.`))return;const removed=placements.splice(selectedPlacement,1)[0];if(removed.runtime_id&&!removedRuntimeIds.includes(Number(removed.runtime_id)))removedRuntimeIds.push(Number(removed.runtime_id));selectedPlacement=Math.min(selectedPlacement,placements.length-1);if(selectedPlacement>=0)selectPlacement(selectedPlacement);else{rebuildPlacementBuffers();renderPlacementList();}placementStatusEl.textContent=removed.runtime_id?`Marked runtime object #${Number(removed.runtime_id).toString(16)} for removal.`:"Removed from sidecar.";updateAssetControls();});
+document.getElementById("duplicatePlacement").addEventListener("click",()=>{if(selectedPlacement<0||!placements[selectedPlacement])return;const source=placements[selectedPlacement];if(source.kind==='light'){placementStatusEl.textContent="Light duplication is not supported yet; native light table links must remain stable.";return;}const copy={...source};delete copy.runtime_id;copy.native=false;copy.name=`${source.name||"object"}_copy`;copy.runtime_name=source.runtime_name?`${source.runtime_name.slice(0,10)}_copy`:"";try{const normalized=normalizePlacement(copy,placements.length);placements.splice(selectedPlacement+1,0,normalized);selectedPlacement+=1;selectPlacement(selectedPlacement);placementStatusEl.textContent="Duplicated selected object; Apply will allocate a new runtime ID.";}catch(e){placementStatusEl.textContent=e.message;}});
+document.getElementById("applyPlacementEdit").addEventListener("click",()=>{if(writePlacementFromForm())placementStatusEl.textContent="Selected placement updated in the sidecar.";});
+[objectTypeEl,objectAssetEl,animationAssetEl,objectNameEl,objectRuntimeNameEl,objectXEl,objectYEl,objectZEl,objectRotationEl].forEach(el=>el.addEventListener("input",writePlacementFromForm));
 objectAssetEl.addEventListener("change",writePlacementFromForm); animationAssetEl.addEventListener("change",writePlacementFromForm);
+document.getElementById("nudgeXMinus").addEventListener("click",()=>nudgeSelected(-controlStep(transformStepEl,10),0,0,0));
+document.getElementById("nudgeXPlus").addEventListener("click",()=>nudgeSelected(controlStep(transformStepEl,10),0,0,0));
+document.getElementById("nudgeYMinus").addEventListener("click",()=>nudgeSelected(0,-controlStep(transformStepEl,10),0,0));
+document.getElementById("nudgeYPlus").addEventListener("click",()=>nudgeSelected(0,controlStep(transformStepEl,10),0,0));
+document.getElementById("nudgeZMinus").addEventListener("click",()=>nudgeSelected(0,0,-controlStep(transformStepEl,10),0));
+document.getElementById("nudgeZPlus").addEventListener("click",()=>nudgeSelected(0,0,controlStep(transformStepEl,10),0));
+document.getElementById("rotateMinus").addEventListener("click",()=>nudgeSelected(0,0,0,-controlStep(rotationStepEl,5)));
+document.getElementById("rotatePlus").addEventListener("click",()=>nudgeSelected(0,0,0,controlStep(rotationStepEl,5)));
 function updateAnimationToggleLabel() { animationToggleEl.textContent=animationPlayingEl.checked?"Pause SRL playback":"Play SRL playback"; }
 animationPlayingEl.addEventListener("change",()=>{lastAnimationFrame=-1;updateAnimationToggleLabel();});
 animationToggleEl.addEventListener("click",()=>{animationPlayingEl.checked=!animationPlayingEl.checked;lastAnimationFrame=-1;updateAnimationToggleLabel();});
@@ -639,23 +991,24 @@ applyEventsEl.addEventListener("click",async()=>{
     if(original&&Number.isInteger(value)&&value!==Number(original.operand)) patches.push({kind:"script_word",event_index:event.index,action_index:selectedEventAction,script:input.dataset.script,word_index:Number(input.dataset.wordIndex),value});
   });
   if(!patches.every(p=>Number.isInteger(p.value))){eventStatusEl.textContent="Every event value must be an integer.";return;}
-  if(!window.confirm(`Write edits to ${assetSelect.value}? A timestamped backup will be created first.`))return;
+  if(!window.confirm(applyConfirmation("Apply the edited event fields?")))return;
   applyEventsEl.disabled=true; eventStatusEl.textContent="Writing event backup and validating the patched graph…";
-  try { const response=await fetch("/api/apply-events",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:assetSelect.value,patches})}); const result=await response.json(); if(!response.ok)throw new Error(result.error||"event write failed"); eventStatusEl.textContent=result.written?`Applied ${result.changed} event field${result.changed===1?"":"s"}. Backup: ${result.backup}`:"No event changes to write."; await loadPath(assetSelect.value); } catch(e) { eventStatusEl.textContent=`Event write failed: ${e.message}`; } finally { updateAssetControls(); }
+  try { const response=await fetch("/api/apply-events",{method:"POST",headers:writeHeaders(),body:JSON.stringify({path:assetSelect.value,patches})}); const result=await response.json(); if(!response.ok)throw new Error(result.error||"event write failed"); eventStatusEl.textContent=result.written?`Applied ${result.changed} event field${result.changed===1?"":"s"}. Backup: ${result.backup}`:"No event changes to write."; await loadPath(assetSelect.value); } catch(e) { eventStatusEl.textContent=`Event write failed: ${e.message}`; } finally { updateAssetControls(); }
 });
 [markerXEl,markerYEl,markerZEl].forEach(el=>el.addEventListener("input",writeMarkerFromForm));
 exportSceneEl.addEventListener("click",()=>{if(!model)return;const blob=new Blob([JSON.stringify({format:"soul-re-scene-v1",source:model.path,summary:model.summary,markers:model.markers},null,2)+"\n"],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${(model.summary.world_name||model.asset_type||"asset")}-scene.json`;a.click();URL.revokeObjectURL(a.href);});
-applyMarkersEl.addEventListener("click",async()=>{if(!directWritesEnabled||!model)return;if(!window.confirm(`Write marker changes directly to ${assetSelect.value}? A timestamped backup will be created first.`))return;applyMarkersEl.disabled=true;writeStatusEl.textContent="Writing backup and patched DRM…";try{const response=await fetch("/api/apply-markers",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:assetSelect.value,markers:model.markers})});const result=await response.json();if(!response.ok)throw new Error(result.error||"direct write failed");writeStatusEl.textContent=result.written?`Applied. Backup: ${result.backup}`:"No changes to write.";await loadPath(assetSelect.value);}catch(e){writeStatusEl.textContent=`Write failed: ${e.message}`;}finally{applyMarkersEl.disabled=!directWritesEnabled;}});
-applyPlacementsEl.addEventListener("click",async()=>{if(!directWritesEnabled||!model||!placements.length)return;if(placements.some(p=>p.kind!=="object")){writeStatusEl.textContent="Only object placements can be written to the runtime intro table.";return;}if(!window.confirm(`Append ${placements.length} object${placements.length===1?"":"s"} to ${assetSelect.value}? A timestamped backup will be created first. Applying the same placements again appends duplicates.`))return;applyPlacementsEl.disabled=true;writeStatusEl.textContent="Writing backup and appending runtime objects…";try{const response=await fetch("/api/apply-placements",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:assetSelect.value,placements})});const result=await response.json();if(!response.ok)throw new Error(result.error||"placement write failed");writeStatusEl.textContent=result.written?`Appended ${result.changed} object${result.changed===1?"":"s"}. Backup: ${result.backup}`:"No changes to write.";await loadPath(assetSelect.value);}catch(e){writeStatusEl.textContent=`Write failed: ${e.message}`;}finally{updateAssetControls();}});
-document.getElementById("exportPlacements").addEventListener("click",()=>{if(!model)return;const blob=new Blob([JSON.stringify({format:"soul-re-placement-v1",source:model.path,placements},null,2)+"\n"],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${(model.summary.world_name||"level")}-placements.json`;a.click();URL.revokeObjectURL(a.href);});
+applyMarkersEl.addEventListener("click",async()=>{if(!directWritesEnabled||!model)return;if(!window.confirm(applyConfirmation("Apply marker coordinate changes?")))return;applyMarkersEl.disabled=true;writeStatusEl.textContent="Writing backup and patched DRM…";try{const response=await fetch("/api/apply-markers",{method:"POST",headers:writeHeaders(),body:JSON.stringify({path:assetSelect.value,markers:model.markers})});const result=await response.json();if(!response.ok)throw new Error(result.error||"direct write failed");writeStatusEl.textContent=result.written?`Applied. Backup: ${result.backup}`:"No changes to write.";await loadPath(assetSelect.value);}catch(e){writeStatusEl.textContent=`Write failed: ${e.message}`;}finally{updateAssetControls();}});
+applyPlacementsEl.addEventListener("click",async()=>{if(!directWritesEnabled||!model||applyPlacementsEl.disabled)return;if(placements.some(p=>!['object','light'].includes(p.kind))){writeStatusEl.textContent="Only object and light placements can be written.";return;}const total=placements.length+removedRuntimeIds.length;if(!total)return;if(!window.confirm(applyConfirmation(`Synchronize ${placements.filter(p=>p.kind==='object').length} objects and ${placements.filter(p=>p.kind==='light').length} lights, including ${placements.filter(p=>p.native).length} native records, and remove ${removedRuntimeIds.length} runtime objects?`)))return;applyPlacementsEl.disabled=true;writeStatusEl.textContent="Writing backup and synchronizing scene objects/lights…";try{const response=await fetch("/api/apply-placements",{method:"POST",headers:writeHeaders(),body:JSON.stringify({path:assetSelect.value,source_sha1:model.source_sha1,placements,remove_runtime_ids:removedRuntimeIds})});const result=await response.json();if(!response.ok)throw new Error(result.error||"placement write failed");if(Array.isArray(result.added)){const byIndex=new Map(result.added.map(item=>[Number(item.index),item]));placements=placements.map((p,i)=>{const item=byIndex.get(i);return item?{...p,runtime_id:Number(item.runtime_id??item.identifier)}:p;});}removedRuntimeIds=[];importedSidecar=null;writeStatusEl.textContent=result.written?"Scene write complete; backup path is shown below.":"No changes to write.";placementStatusEl.textContent=result.written?`Synchronized ${result.changed} scene change${result.changed===1?"":"s"}. Backup: ${result.backup}`:"Scene already matches this sidecar.";renderPlacementList();await loadPath(assetSelect.value);}catch(e){writeStatusEl.textContent=`Write failed: ${e.message}`;}finally{updateAssetControls();}});
+document.getElementById("exportPlacements").addEventListener("click",()=>{if(!model)return;const payload={format:"soul-re-placement-v2",source:importedSidecar?.source||model.path,source_sha1:importedSidecar?.source_sha1||model.source_sha1,placements,remove_runtime_ids:removedRuntimeIds};const blob=new Blob([JSON.stringify(payload,null,2)+"\n"],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${(model.summary.world_name||"level")}-placements.json`;a.click();URL.revokeObjectURL(a.href);placementStatusEl.textContent=`Saved ${placements.length} placements and ${removedRuntimeIds.length} pending removals.`;});
 document.getElementById("importPlacements").addEventListener("click",()=>placementFileEl.click());
-placementFileEl.addEventListener("change",async()=>{const file=placementFileEl.files[0];if(!file)return;try{const data=JSON.parse(await file.text());if(data.format!=="soul-re-placement-v1"||!Array.isArray(data.placements))throw new Error("Not a soul-re-placement-v1 file");placements=data.placements.filter(p=>p&&[p.x,p.y,p.z].every(Number.isFinite)).map((p,i)=>({kind:["object","spawn","trigger","light"].includes(p.kind)?p.kind:"object",asset:String(p.asset||""),animation:String(p.animation||""),name:String(p.name||`custom_object_${i}`),x:Number(p.x),y:Number(p.y),z:Number(p.z),rotation:Number(p.rotation||0),scale:Number(p.scale||1)}));selectedPlacement=placements.length-1;if(selectedPlacement>=0)selectPlacement(selectedPlacement);else{rebuildPlacementBuffers();renderPlacementList();}updateAssetControls();await ensureObjectAssets();await ensureAnimationAssets();}catch(e){statusEl.textContent="Placement import error";}});
-canvas.addEventListener("click",e=>{if(!placementMode||dragMoved)return;const hit=terrainHit(e.clientX,e.clientY);if(hit){addPlacement(hit);placementMode=false;placeModeEl.textContent="Click to place";canvas.style.cursor="grab";}});
+placementFileEl.addEventListener("change",async()=>{const file=placementFileEl.files[0];if(!file)return;try{const data=JSON.parse(await file.text());if(!["soul-re-placement-v1","soul-re-placement-v2"].includes(data.format)||!Array.isArray(data.placements))throw new Error("Not a soul-re-placement sidecar");const importedPlacements=data.placements.map((p,i)=>normalizePlacement(p,i)); importedSidecar={source:data.source,source_sha1:data.source_sha1}; placements=importedPlacements;removedRuntimeIds=Array.isArray(data.remove_runtime_ids)?data.remove_runtime_ids.map(Number).filter(Number.isInteger):[];const sourceWarning=data.source&&model&&data.source!==model.path?`Loaded sidecar for ${data.source}; current asset is ${model.path}.`:"";const hashWarning=data.source_sha1&&model?.source_sha1&&String(data.source_sha1).toLowerCase()!==String(model.source_sha1).toLowerCase()?" The sidecar hash does not match the loaded scene; reload the correct asset before Apply.":"";placementStatusEl.textContent=sourceWarning+hashWarning||`Loaded ${placements.length} placements.`;selectedPlacement=placements.length-1;if(selectedPlacement>=0)selectPlacement(selectedPlacement);else{rebuildPlacementBuffers();renderPlacementList();}updateAssetControls();await ensureObjectAssets();await ensureAnimationAssets();}catch(e){placementStatusEl.textContent=`Placement import error: ${e.message}`;}finally{placementFileEl.value="";}});
+canvas.addEventListener("click",e=>{if(dragMoved)return;if(placementMode){const hit=terrainHit(e.clientX,e.clientY);if(hit){addPlacement(hit);placementMode=false;placeModeEl.textContent="Click to place";canvas.style.cursor="grab";}return;}const picked=pickPlacement(e.clientX,e.clientY);if(picked>=0){selectPlacement(picked);placementStatusEl.textContent=`Selected ${placements[picked].name}${placements[picked].native?" (native)":""}.`;}});
 canvas.addEventListener("pointerdown",e=>{dragMoved=false;drag={x:e.clientX,y:e.clientY,pan:e.shiftKey||e.button===1};canvas.classList.add("dragging");canvas.setPointerCapture(e.pointerId);});
 canvas.addEventListener("pointerup",e=>{drag=null;canvas.classList.remove("dragging");canvas.releasePointerCapture(e.pointerId);});
 canvas.addEventListener("pointermove",e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>3)dragMoved=true;drag.x=e.clientX;drag.y=e.clientY;if(drag.pan){view.panX-=dx*.004*view.distance;view.panY+=dy*.004*view.distance;}else{view.yaw-=dx*.008;view.pitch=Math.max(-1.45,Math.min(1.45,view.pitch-dy*.008));}});
 canvas.addEventListener("wheel",e=>{e.preventDefault();view.distance=Math.max(.2,Math.min(30,view.distance*Math.exp(e.deltaY*.001)));},{passive:false});
-window.addEventListener("resize",resize); updateAnimationToggleLabel(); init(); requestAnimationFrame(render);
+window.addEventListener("keydown",e=>{if(selectedPlacement<0||!placements[selectedPlacement]||["INPUT","SELECT","TEXTAREA"].includes(document.activeElement?.tagName))return;const p=placements[selectedPlacement],step=e.shiftKey?100:10;let changed=true;switch(e.key){case"ArrowLeft":p.x-=step;break;case"ArrowRight":p.x+=step;break;case"ArrowUp":p.y+=step;break;case"ArrowDown":p.y-=step;break;case"PageUp":p.z+=step;break;case"PageDown":p.z-=step;break;case"q":case"Q":p.rotation=Number(p.rotation||0)- (e.shiftKey?15:5);break;case"e":case"E":p.rotation=Number(p.rotation||0)+ (e.shiftKey?15:5);break;case"Delete":document.getElementById("deletePlacement").click();e.preventDefault();return;case"d":case"D":if(e.ctrlKey){document.getElementById("duplicatePlacement").click();e.preventDefault();return;}changed=false;break;default:changed=false;}if(changed){p.x=Math.max(-32768,Math.min(32767,Math.round(p.x)));p.y=Math.max(-32768,Math.min(32767,Math.round(p.y)));p.z=Math.max(-32768,Math.min(32767,Math.round(p.z)));placements[selectedPlacement]=p;objectXEl.value=p.x;objectYEl.value=p.y;objectZEl.value=p.z;objectRotationEl.value=p.rotation;rebuildPlacementBuffers();renderPlacementList();updateAssetControls();e.preventDefault();}});
+window.addEventListener("resize",resize); updateAssetControls(); updateAnimationToggleLabel(); init(); requestAnimationFrame(render);
 </script>
 </body>
 </html>
